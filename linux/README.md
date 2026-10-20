@@ -4,8 +4,13 @@
 **「自愈守护进程 + 一组挂件 + 图形控制中心」** 实现同样的目标：**一个软件统管全部桌面挂件**。
 
 - **桌面挂件控制中心** (`desktop-widgets-hub`)：图形界面，列出全部 17 个挂件，可逐项
-  **启用/停用、启动/停止/重启**，也有「全部启动 / 全部停止 / 重启守护」一键操作。
+  **启用/停用、启动/停止/重启/⚙ 独立设置**，也有「全部启动 / 全部停止 / 重启守护」一键操作。
   相当于 Linux 版的 WidgetHub 主界面。
+  - **系统托盘图标 + 右键菜单**：打开 / 全部启动 / 全部停止 / 重启守护 / 开机自启 / 检查更新 / 退出；
+  - **每个挂件的设置**：启动命令、附加参数、崩溃重启延迟、是否自动重启、单独指定字体；
+  - **版本号 + 一键更新**：标题栏与底栏显示版本，自动/手动检查最新版，点「立即更新」即
+    自动下载 .deb 并经 pkexec 提权安装（Deepin 不可变系统自动走 `deepin-immutable-ctl`）；
+  - **平滑滚动**：滚轮带缓动、列表可按住拖动，状态刷新改为单次进程快照，不再卡顿。
 
 - 17 个挂件：日历 / 相框 / 监听 / 视频 / 音乐 / 记事 / 电台 / RSS / 计时 / 钱包 / 天气 /
   Edge 滚动控制 / 显示器输入切换 / 任务栏信息 / 截图 OCR / 鼠标拖尾 / 复制工具栏
@@ -24,10 +29,10 @@ Deepin 25 是 **不可变系统**（ostree），系统目录只读，必须用 `
 在可写层安装。在**本机终端**执行：
 
 ```bash
-# 安装包位于本仓库 linux/dist/desktop-widgets-suite_2.9.74_all.deb
+# 安装包位于本仓库 linux/dist/desktop-widgets-suite_2.9.75_all.deb
 # 用 dpkg -i 强制重装（版本号不变时 apt 会跳过，dpkg 会覆盖文件）
 sudo deepin-immutable-ctl admin exec -- dpkg -i \
-    /path/to/linux/dist/desktop-widgets-suite_2.9.74_all.deb
+    /path/to/linux/dist/desktop-widgets-suite_2.9.75_all.deb
 ```
 
 安装后守护进程会随登录自启；若想立刻生效（不重登录）：
@@ -46,12 +51,12 @@ nohup python3 /usr/local/lib/desktop-widgets-supervisor/supervisor.py >/dev/null
 linux/
 ├── README.md                 本文件
 ├── dist/
-│   └── desktop-widgets-suite_2.9.74_all.deb   # Linux 安装包（v1.0 Release 资源）
+│   └── desktop-widgets-suite_2.9.75_all.deb   # Linux 安装包（v1.0 Release 资源）
 ├── build/
 │   └── build-deb.py          # 纯标准库 .deb 构建器（无需 dpkg-deb/ar/tar 命令）
 ├── debian/                   # 打包元数据：control / postinst / prerm / postrm
 ├── supervisor/
-│   └── supervisor.py         # 自愈守护进程（统管 17 个挂件）
+│   └── supervisor.py         # 自愈守护进程（统管 17 个挂件，遵守 settings.json 的参数）
 ├── hub/                      # 桌面挂件控制中心（图形界面，GTK3）
 │   ├── desktop-widgets-hub   #   自包含单文件启动器（含全部 GUI 逻辑）
 │   └── desktop-widgets-hub.desktop  # 开始菜单项
@@ -73,28 +78,30 @@ linux/
 ```bash
 # 方式 A：以现有参考包为基准，剔除运行期垃圾（.pyc / .pid / .log）并重算 md5sums
 python3 build/build-deb.py \
-    --reference dist/desktop-widgets-suite_2.9.74_all.deb \
-    --output    dist/desktop-widgets-suite_2.9.74_all.deb
+    --reference dist/desktop-widgets-suite_2.9.75_all.deb \
+    --output    dist/desktop-widgets-suite_2.9.75_all.deb
 
 # 方式 A+：在 A 基础上注入「控制中心 + 字体解析模块 widget_font.py」，
 #          并把各挂件写死的字体改为「运行时读取系统默认字体」
 python3 build/build-deb.py --patch \
-    --reference dist/desktop-widgets-suite_2.9.74_all.deb \
-    --output    dist/desktop-widgets-suite_2.9.74_all.deb
+    --reference dist/desktop-widgets-suite_2.9.75_all.deb \
+    --output    dist/desktop-widgets-suite_2.9.75_all.deb
 
 # 方式 B：直接在已安装的本机上，以「已安装的挂件目录」为源重建
-python3 build/build-deb.py --from-live --output dist/desktop-widgets-suite_2.9.74_all.deb
+python3 build/build-deb.py --from-live --output dist/desktop-widgets-suite_2.9.75_all.deb
 
 # 仅校验产出包的 md5sums 自洽性
-python3 build/build-deb.py --check --output dist/desktop-widgets-suite_2.9.74_all.deb
+python3 build/build-deb.py --check --output dist/desktop-widgets-suite_2.9.75_all.deb
 ```
 
 ### 字体跟随系统默认（本版重点）
 
 挂件不再写死字体族名（如 `FZSongHei-B07`），而是 **运行时读取系统「界面默认字体」**：
 
-- `common/widget_font.py`：优先读 `gsettings org.gnome.desktop.interface font-name`，
-  回退到 `fc-match` 的默认族名。你改了系统默认字体（如方正宋黑），挂件会同步变化。
+- `common/widget_font.py`：优先读**控制中心里为该挂件单独设置的字体**
+  （`~/.config/desktop-widgets/font-<挂件key>.txt`），其次全局覆盖字体
+  （`~/.config/desktop-widgets/font.txt`），再读 `gsettings org.gnome.desktop.interface font-name`，
+  最后回退到 `fc-match` 的默认族名。你改了系统默认字体（如方正宋黑），挂件会同步变化。
   构建时（`--patch`）会把它复制到**每个挂件自己的目录**，挂件 `import widget_font` 即可用，
   无需额外 sys.path 配置。
 - 构建时（`--patch`）会把 12 个挂件源码里的 `DEFAULT_FONT` / `*_FONT` 常量自动改写为
@@ -110,11 +117,16 @@ python3 build/build-deb.py --check --output dist/desktop-widgets-suite_2.9.74_al
 - 列表展示 17 个挂件，每行显示状态（运行中 / 未运行 / 已禁用）。
 - **开关**：启用/停用该挂件（底层即 `.off` 标记 + 启停进程）。
 - **重启 / 停止**：对单个挂件操作。
+- 每行右侧：**⚙ 设置 / 重启 / 停止** 三个按钮；点「⚙ 设置」可改启动参数、崩溃重启延迟、
+  是否自动重启、该挂件字体（留空=跟随系统默认）。
 - 顶部工具条：**全部启动 / 全部停止 / 重启守护 / 刷新**。
 - 标题栏左侧有「**开机自启**」开关：打开后控制中心会在你每次登录桌面时自动弹出。
-- 状态由自愈守护 `supervisor.py` 统一管理，控制中心通过标记文件与信号与之协作。
-
-> 控制中心本身不常驻后台，按需打开即可；若想登录即见，可拨动「开机自启」开关。
+- 右下角显示当前版本与「检查更新」；有新版本时顶部出现横幅，点「立即更新」自动完成
+  下载 → 提权安装 → 重启守护。私有仓库首次检查需在「⋮ → 更新设置」里填入 GitHub
+  访问令牌（只保存在本机 `~/.config/desktop-widgets/update.json`，权限 600）。
+- 关闭窗口只是隐藏到托盘，托盘图标右键可再次打开或退出。
+- 状态由自愈守护 `supervisor.py` 统一管理，控制中心通过标记文件与信号与之协作；
+  设置写在 `~/.config/desktop-widgets/settings.json`，守护按其中的参数拉起挂件。
 
 ---
 
@@ -158,7 +170,7 @@ sudo bash linux/install.sh rollback
 **安装步骤**
 ```bash
 # 1) 拷贝安装包到目标机后，一条命令安装
-sudo dpkg -i desktop-widgets-suite_2.9.74_all.deb
+sudo dpkg -i desktop-widgets-suite_2.9.75_all.deb
 
 # 2) 若提示缺运行库（python3-gi / gir1.2-gtk-3.0 等），让 apt 自动补全
 sudo apt-get install -f
