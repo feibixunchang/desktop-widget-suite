@@ -52,14 +52,11 @@ linux/
 ├── debian/                   # 打包元数据：control / postinst / prerm / postrm
 ├── supervisor/
 │   └── supervisor.py         # 自愈守护进程（统管 17 个挂件）
-├── hub/                      # 桌面挂件控制中心（图形界面）
-│   ├── hub.py                #   GTK3 主程序
-│   ├── desktop-widgets-hub   #   启动器
+├── hub/                      # 桌面挂件控制中心（图形界面，GTK3）
+│   ├── desktop-widgets-hub   #   自包含单文件启动器（含全部 GUI 逻辑）
 │   └── desktop-widgets-hub.desktop  # 开始菜单项
 ├── common/
-│   └── widget_font.py        # 运行时读取「系统默认界面字体」的共享模块
-├── fonts/
-│   └── 99-desktop-widgets.conf  # fontconfig 别名兜底（FZSongHei-B07→系统默认）
+│   └── widget_font.py        # 运行时读取「系统默认界面字体」；打包时复制到各挂件目录
 ├── launchers/                # 各挂件的启动器脚本
 │   ├── usr-local-bin/        #   /usr/local/bin/desktop-* 等
 │   └── usr-bin/              #   /usr/bin/{taskbar-info,shot-ocr,mouse-trail,copy-toolbar,...}
@@ -79,7 +76,7 @@ python3 build/build-deb.py \
     --reference dist/desktop-widgets-suite_2.9.74_all.deb \
     --output    dist/desktop-widgets-suite_2.9.74_all.deb
 
-# 方式 A+：在 A 基础上注入「控制中心 / 字体解析 / fontconfig 别名」，
+# 方式 A+：在 A 基础上注入「控制中心 + 字体解析模块 widget_font.py」，
 #          并把各挂件写死的字体改为「运行时读取系统默认字体」
 python3 build/build-deb.py --patch \
     --reference dist/desktop-widgets-suite_2.9.74_all.deb \
@@ -98,8 +95,8 @@ python3 build/build-deb.py --check --output dist/desktop-widgets-suite_2.9.74_al
 
 - `common/widget_font.py`：优先读 `gsettings org.gnome.desktop.interface font-name`，
   回退到 `fc-match` 的默认族名。你改了系统默认字体（如方正宋黑），挂件会同步变化。
-- `fonts/99-desktop-widgets.conf`：fontconfig 别名兜底，把 `FZSongHei-B07` 映射到
-  `sans-serif`（即系统默认无衬线字体）。
+  构建时（`--patch`）会把它复制到**每个挂件自己的目录**，挂件 `import widget_font` 即可用，
+  无需额外 sys.path 配置。
 - 构建时（`--patch`）会把 12 个挂件源码里的 `DEFAULT_FONT` / `*_FONT` 常量自动改写为
   引用上述系统字体，过程幂等、可重复构建。
 
@@ -114,9 +111,10 @@ python3 build/build-deb.py --check --output dist/desktop-widgets-suite_2.9.74_al
 - **开关**：启用/停用该挂件（底层即 `.off` 标记 + 启停进程）。
 - **重启 / 停止**：对单个挂件操作。
 - 顶部工具条：**全部启动 / 全部停止 / 重启守护 / 刷新**。
+- 标题栏左侧有「**开机自启**」开关：打开后控制中心会在你每次登录桌面时自动弹出。
 - 状态由自愈守护 `supervisor.py` 统一管理，控制中心通过标记文件与信号与之协作。
 
-> 控制中心本身不常驻后台，按需打开即可。
+> 控制中心本身不常驻后台，按需打开即可；若想登录即见，可拨动「开机自启」开关。
 
 ---
 
@@ -144,3 +142,34 @@ rm     ~/.config/desktop-widgets/desktop-weather.off   # 恢复
 ```bash
 sudo bash linux/install.sh rollback
 ```
+
+---
+
+## 7. 在其他 Linux 机器上安装
+
+本 `.deb` 是**自包含安装包**：17 个挂件 + 控制中心 + 字体跟随修复全部打包在一起，
+复制这一个文件即可在任何同架构机器上一步装好，**无需联网拉源码、无需手动装依赖**。
+
+**适用环境**
+- 桌面环境：Deepin 25 / 统信 UOS（DDE）、其他 Debian / Ubuntu 系发行版（GTK3 环境）。
+- 架构：**x86_64 (amd64)**。原包捆绑了一个 amd64 的 `mpv` 二进制，故目前仅支持该架构；
+  若需在 arm64 等架构使用，需把 `mpv` 改为目标机 `apt` 安装后重新打包（属原包设计，非本工程新增）。
+
+**安装步骤**
+```bash
+# 1) 拷贝安装包到目标机后，一条命令安装
+sudo dpkg -i desktop-widgets-suite_2.9.74_all.deb
+
+# 2) 若提示缺运行库（python3-gi / gir1.2-gtk-3.0 等），让 apt 自动补全
+sudo apt-get install -f
+
+# 3) 打开控制中心（统管全部挂件）
+desktop-widgets-hub        # 或开始菜单搜「桌面挂件控制中心」
+```
+
+**说明**
+- 依赖声明已写入 `debian/control`（`python3-gi`、`gir1.2-gtk-3.0`、`python3-xlib`、
+  `fonts-noto-cjk` 等），目标机执行 `apt-get install -f` 会自动拉齐 GTK3 与 PyGObject 运行时。
+- 守护进程随登录自启（通过 `/etc/xdg/autostart/desktop-widgets-supervisor.desktop`），
+  控制中心按需打开；如需登录即弹出，拨动其标题栏「开机自启」开关即可。
+- 字体默认跟随目标机「系统界面默认字体」，无需逐机改配置。

@@ -1,3 +1,363 @@
-#!/bin/bash
-export PATH=/usr/local/bin:$PATH
-exec python3 /usr/local/lib/desktop-widgets-hub/hub.py "$@"
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""桌面挂件控制中心 (WidgetHub for Linux) — 自包含单文件启动器
+
+统管全部桌面挂件的图形界面：
+  - 列出所有挂件，显示运行状态（运行中 / 未运行 / 已禁用）
+  - 开关：启用 / 停用（通过 ~/.config/desktop-widgets/<name>.off 标记）
+  - 启动 / 停止 / 重启 单个挂件
+  - 一键 全部启动 / 全部停止 / 重启守护 / 刷新
+  - 标题栏「开机自启」开关：登录桌面时自动打开控制中心
+
+挂件状态由自愈守护 (supervisor.py) 统一管理；本程序通过标记文件与进程信号与之协作。
+"""
+import os
+import sys
+import time
+import shutil
+import subprocess
+import shlex
+
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, GLib
+
+HOME = os.path.expanduser('~')
+MARK_DIR = os.path.join(HOME, '.config', 'desktop-widgets')
+SUP_PY = '/usr/local/lib/desktop-widgets-supervisor/supervisor.py'
+
+# (key, 启动命令, pgrep 匹配串, 中文名)
+WIDGETS = [
+    ('desktop-calendar', '/usr/local/bin/desktop-calendar',
+     '/usr/local/lib/desktop-calendar/calendar_widget.py', '桌面日历'),
+    ('desktop-frame', '/usr/local/bin/desktop-frame',
+     '/usr/local/lib/desktop-frame/frame.py', '桌面相框'),
+    ('desktop-monitor', '/usr/local/bin/desktop-monitor',
+     '/opt/desktop-monitor/monitor.py', '桌面监控'),
+    ('desktop-movie', '/usr/local/bin/desktop-movie',
+     '/usr/local/lib/desktop-movie/desktop-movie.py', '桌面视频'),
+    ('desktop-music', '/usr/local/bin/desktop-music',
+     '/usr/local/lib/desktop-music/music.py', '桌面音乐'),
+    ('desktop-notes', '/usr/local/bin/desktop-notes',
+     '/usr/local/lib/desktop-notes/notes.py', '桌面便签'),
+    ('desktop-radio', '/usr/local/bin/desktop-radio',
+     '/usr/local/lib/desktop-radio/radio.py', '桌面收音机'),
+    ('desktop-rss', '/usr/local/bin/desktop-rss',
+     '/usr/local/lib/desktop-rss/rss.py', '桌面RSS'),
+    ('desktop-timer', '/usr/local/bin/desktop-timer',
+     '/usr/local/lib/desktop-timer/timer_alarm_widget.py', '桌面计时器'),
+    ('desktop-weather', '/usr/local/bin/desktop-weather',
+     '/usr/local/lib/desktop-weather/widget.py', '桌面天气'),
+    ('edge-scroll-control', '/usr/local/bin/edge-scroll-control',
+     '/usr/local/lib/edge-scroll-control/main.py', '边缘滚轮控制'),
+    ('desktop-wallet', '/usr/local/bin/desktop-wallet',
+     '/usr/local/lib/desktop-wallet/wallet.py', '桌面记账'),
+    ('monitor-input-switch', '/usr/local/bin/monitor-input-switch',
+     '/usr/local/lib/monitor-input-switch/main.py', '显示器输入切换'),
+    ('taskbar-info', '/usr/bin/taskbar-info',
+     '/usr/lib/taskbar-info/taskbar-info.py', '任务栏信息条'),
+    ('shot-ocr', '/usr/bin/shot-ocr --autostart',
+     '/usr/lib/shot-ocr/main.py', '截图OCR翻译'),
+    ('mouse-trail', '/usr/bin/mouse-trail',
+     '/usr/lib/mouse-trail/main.py', '鼠标炫彩拖尾'),
+    ('copy-toolbar', '/usr/bin/copy-toolbar',
+     '/usr/lib/copy-toolbar/main.py', '划选复制工具条'),
+]
+
+
+# ── 底层操作 ──────────────────────────────────────────────
+def is_running(pattern):
+    try:
+        r = subprocess.run(['pgrep', '-f', pattern],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=5)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def is_disabled(key):
+    return os.path.exists(os.path.join(MARK_DIR, key + '.off'))
+
+
+def set_enabled(key, enable):
+    mark = os.path.join(MARK_DIR, key + '.off')
+    if enable:
+        try:
+            os.remove(mark)
+        except FileNotFoundError:
+            pass
+    else:
+        os.makedirs(MARK_DIR, exist_ok=True)
+        try:
+            open(mark, 'w').close()
+        except Exception:
+            pass
+
+
+def start_widget(cmd):
+    try:
+        subprocess.Popen(shlex.split(cmd), stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print('start failed %s: %s' % (cmd, e), file=sys.stderr)
+
+
+def stop_widget(pattern):
+    try:
+        subprocess.run(['pkill', '-f', pattern],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=5)
+    except Exception:
+        pass
+
+
+def restart_supervisor():
+    stop_widget(SUP_PY)
+    time.sleep(1)
+    try:
+        subprocess.Popen(['python3', SUP_PY], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print('supervisor restart failed: %s' % e, file=sys.stderr)
+
+
+# ── 控制中心「开机自启」开关 ─────────────────────────────
+AUTOSTART_SRC = '/usr/local/share/applications/desktop-widgets-hub.desktop'
+AUTOSTART_DST = os.path.join(HOME, '.config', 'autostart', 'desktop-widgets-hub.desktop')
+
+
+def autostart_enabled():
+    return os.path.lexists(AUTOSTART_DST)
+
+
+def set_autostart(enable):
+    dst = AUTOSTART_DST
+    try:
+        if enable:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if os.path.lexists(dst):
+                os.remove(dst)
+            try:
+                os.symlink(AUTOSTART_SRC, dst)
+            except OSError:
+                shutil.copy(AUTOSTART_SRC, dst)
+        else:
+            if os.path.lexists(dst):
+                os.remove(dst)
+    except Exception as e:
+        print('autostart toggle failed: %s' % e, file=sys.stderr)
+
+
+# ── 单行（一个挂件） ─────────────────────────────────────
+class HubRow(Gtk.ListBoxRow):
+    def __init__(self, key, cmd, pattern, label):
+        super().__init__()
+        self.key = key
+        self.cmd = cmd
+        self.pattern = pattern
+        self.label = label
+        self._updating = False
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        self.add(box)
+
+        self.dot = Gtk.Label()
+        self.dot.set_markup('<span foreground="#888888" font="Sans 14">●</span>')
+        box.pack_start(self.dot, False, False, 0)
+
+        name = Gtk.Label()
+        name.set_markup('<b>%s</b>\n<span foreground="#888888" size="small">%s</span>' % (label, key))
+        name.set_xalign(0)
+        box.pack_start(name, True, True, 0)
+
+        self.switch = Gtk.Switch()
+        self.switch.connect('notify::active', self._on_switch)
+        box.pack_start(self.switch, False, False, 0)
+
+        btn_restart = Gtk.Button(label='重启')
+        btn_restart.connect('clicked', lambda b: self.do_restart())
+        box.pack_start(btn_restart, False, False, 0)
+
+        btn_stop = Gtk.Button(label='停止')
+        btn_stop.connect('clicked', lambda b: self.do_stop())
+        box.pack_start(btn_stop, False, False, 0)
+
+    def _on_switch(self, sw, *a):
+        if self._updating:
+            return
+        active = sw.get_active()
+        set_enabled(self.key, active)
+        if active:
+            if not is_running(self.pattern):
+                start_widget(self.cmd)
+        else:
+            stop_widget(self.pattern)
+
+    def do_restart(self):
+        enabled = not is_disabled(self.key)
+        if is_running(self.pattern):
+            stop_widget(self.pattern)
+            time.sleep(1)
+        if enabled:
+            start_widget(self.cmd)
+
+    def do_stop(self):
+        set_enabled(self.key, False)
+        stop_widget(self.pattern)
+        GLib.timeout_add(400, self.refresh)
+
+    def refresh(self):
+        running = is_running(self.pattern)
+        disabled = is_disabled(self.key)
+        if disabled:
+            dot = '<span foreground="#888888" font="Sans 14">●</span>'
+            state = '已禁用'
+        elif running:
+            dot = '<span foreground="#2ecc71" font="Sans 14">●</span>'
+            state = '运行中'
+        else:
+            dot = '<span foreground="#e67e22" font="Sans 14">●</span>'
+            state = '未运行'
+        self.dot.set_markup(dot)
+
+        self._updating = True
+        self.switch.set_active(not disabled)
+        self._updating = False
+
+        # 更新第二行状态文字：name 标签是 box 的第 2 个子（index 1）
+        box = self.get_child()
+        name = box.get_children()[1]
+        name.set_markup('<b>%s</b>\n<span foreground="#888888" size="small">%s · %s</span>'
+                        % (self.label, self.key, state))
+
+
+# ── 主窗口 ───────────────────────────────────────────────
+class HubWindow(Gtk.Window):
+    def __init__(self):
+        super().__init__(title='桌面挂件控制中心')
+        self.set_default_size(460, 640)
+        self.set_border_width(0)
+
+        header = Gtk.HeaderBar()
+        header.set_show_close_button(True)
+        header.set_title('桌面挂件控制中心')
+        self.set_titlebar(header)
+
+        # 开机自启开关
+        auto_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        auto_lbl = Gtk.Label(label='开机自启')
+        auto_box.pack_start(auto_lbl, False, False, 0)
+        self.autostart_switch = Gtk.Switch()
+        self.autostart_switch.connect('notify::active', self._on_autostart)
+        auto_box.pack_start(self.autostart_switch, False, False, 0)
+        header.pack_start(auto_box)
+
+        self._updating_autostart = True
+        self.autostart_switch.set_active(autostart_enabled())
+        self._updating_autostart = False
+
+        btn_refresh = Gtk.Button(label='刷新')
+        btn_refresh.connect('clicked', lambda b: self.refresh_all())
+        header.pack_end(btn_refresh)
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add(vbox)
+
+        # 全局工具条
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        toolbar.set_margin_start(10); toolbar.set_margin_end(10)
+        toolbar.set_margin_top(8); toolbar.set_margin_bottom(8)
+        for label, cb in [
+            ('全部启动', self.all_start),
+            ('全部停止', self.all_stop),
+            ('重启守护', self.restart_daemon),
+        ]:
+            b = Gtk.Button(label=label)
+            b.connect('clicked', cb)
+            toolbar.pack_start(b, False, False, 0)
+        self.status = Gtk.Label()
+        self.status.set_xalign(1)
+        self.status.set_markup('<span foreground="#888888" size="small">就绪</span>')
+        toolbar.pack_end(self.status, False, False, 0)
+        vbox.pack_start(toolbar, False, False, 0)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        vbox.pack_start(sep, False, False, 0)
+
+        # 列表
+        self.listbox = Gtk.ListBox()
+        self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.add(self.listbox)
+        vbox.pack_start(scrolled, True, True, 0)
+
+        self.rows = []
+        for key, cmd, pattern, label in WIDGETS:
+            row = HubRow(key, cmd, pattern, label)
+            self.listbox.add(row)
+            self.rows.append(row)
+
+        self.refresh_all()
+        # 自动刷新
+        GLib.timeout_add(3000, self._auto_refresh)
+
+    def _auto_refresh(self):
+        self.refresh_all(silent=True)
+        return True
+
+    def _on_autostart(self, sw, *a):
+        if getattr(self, '_updating_autostart', False):
+            return
+        enable = sw.get_active()
+        set_autostart(enable)
+        self.status.set_markup('<span foreground="#3498db" size="small">开机自启已%s</span>'
+                               % ('开启' if enable else '关闭'))
+
+    def refresh_all(self, silent=False):
+        run = dis = 0
+        for row in self.rows:
+            row.refresh()
+            if is_disabled(row.key):
+                dis += 1
+            elif is_running(row.pattern):
+                run += 1
+        total = len(self.rows)
+        if not silent:
+            self.status.set_markup('<span foreground="#888888" size="small">共 %d · 运行 %d · 停用 %d</span>' % (total, run, dis))
+
+    def all_start(self, btn):
+        for row in self.rows:
+            set_enabled(row.key, True)
+            if not is_running(row.pattern):
+                start_widget(row.cmd)
+        GLib.timeout_add(500, self.refresh_all)
+        self.status.set_markup('<span foreground="#2ecc71" size="small">已发送全部启动</span>')
+
+    def all_stop(self, btn):
+        for row in self.rows:
+            set_enabled(row.key, False)
+            stop_widget(row.pattern)
+        GLib.timeout_add(500, self.refresh_all)
+        self.status.set_markup('<span foreground="#e67e22" size="small">已发送全部停止</span>')
+
+    def restart_daemon(self, btn):
+        restart_supervisor()
+        GLib.timeout_add(800, self.refresh_all)
+        self.status.set_markup('<span foreground="#3498db" size="small">守护已重启</span>')
+
+
+def main():
+    win = HubWindow()
+    win.connect('destroy', Gtk.main_quit)
+    win.show_all()
+    Gtk.main()
+
+
+if __name__ == '__main__':
+    main()
