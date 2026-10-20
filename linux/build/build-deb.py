@@ -14,7 +14,7 @@ Linux 端 .deb 纯标准库构建器（不依赖 dpkg-deb / ar / tar 等命令�
 
 始终输出一个内容自洽（md5sums 与 data.tar 一致）、可被 `dpkg -i` 安装的 .deb。
 """
-import tarfile, io, hashlib, os, sys, argparse, gzip, re
+import tarfile, io, hashlib, os, sys, argparse, gzip, re, lzma
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                      # linux/
@@ -57,6 +57,58 @@ def write_ar(members):
             out += b'\n'
     return bytes(out)
 
+
+def _tar_header_valid(block):
+    """校验 tar 512 字节头是否真实(校验和匹配)，用于过滤数据块碎片误判。"""
+    if len(block) < 512:
+        return False
+    chk = 0
+    for i in range(512):
+        chk += 0x20 if (148 <= i < 156) else block[i]
+    fld = block[148:156].strip()
+    if not fld:
+        return False
+    try:
+        stored = int(fld, 8)
+    except ValueError:
+        return False
+    return chk == stored
+
+
+def assert_no_pax(xz_blob, label):
+    """确认 xz 内的 tar 不含 PAX 扩展头(typeflag 'x'/'g')；否则 dpkg 报“tar 文件已损坏”。"""
+    raw = lzma.decompress(xz_blob)
+    n = len(raw)
+    off = 0
+    while off + 512 <= n:
+        block = raw[off:off + 512]
+        if block == b'\x00' * 512:
+            break
+        if not _tar_header_valid(block):
+            off += 512
+            continue
+        tf = block[156:157]
+        if tf in (b'x', b'g'):
+            raise SystemExit(
+                "错误: %s 含 PAX 扩展头(typeflag %r)，dpkg 无法安装。请使用 GNU 格式重建。" % (label, tf))
+        try:
+            s = block[124:136].strip()
+            size = int(s, 8) if s else 0
+        except ValueError:
+            size = 0
+        off += 512 + ((size + 511) // 512) * 512
+
+
+def check_deb_format(deb):
+    with open(deb, 'rb') as f:
+        raw = f.read()
+    members = parse_ar(raw)
+    m = {norm(r.decode('utf-8', 'replace').strip()): d for r, d in members}
+    for k in m:
+        if k.startswith('data.tar') or k.startswith('control.tar'):
+            assert_no_pax(m[k], k)
+    print("格式检查: 无 PAX 扩展头 (dpkg 可安装) OK")
+
 def should_skip(nm):
     if nm.endswith(SKIP_SUFFIXES):
         return True
@@ -72,7 +124,7 @@ def rewrite_tar(in_blob, skip_pred, collect_md5=None, extra_files=None,
                 patch_fn=None):
     buf = io.BytesIO()
     with tarfile.open(fileobj=io.BytesIO(in_blob), mode='r:xz') as tin, \
-         tarfile.open(fileobj=buf, mode='w:xz') as tout:
+         tarfile.open(fileobj=buf, mode='w:xz', format=tarfile.GNU_FORMAT) as tout:
         for m in tin.getmembers():
             nm = norm(m.name)
             if skip_pred(nm):
@@ -145,11 +197,14 @@ def build_from_reference(ref_deb, out_deb):
 def rebuild_control(ctrl_blob, md5content):
     cbuf = io.BytesIO()
     with tarfile.open(fileobj=io.BytesIO(ctrl_blob), mode='r:xz') as tin, \
-         tarfile.open(fileobj=cbuf, mode='w:xz') as tout:
+         tarfile.open(fileobj=cbuf, mode='w:xz', format=tarfile.GNU_FORMAT) as tout:
         for mm in tin.getmembers():
             if norm(mm.name) == 'md5sums':
                 continue
             d = tin.extractfile(mm).read() if mm.isfile() else None
+            # 修正 postinst 中 shot-ocr 的 basename 误把 --autostart 当成参数
+            if norm(mm.name) == 'postinst' and d is not None:
+                d = d.replace(b"awk '{print $NF}'", b"awk '{print $1}'")
             nm = tarfile.TarInfo(norm(mm.name))
             nm.mode = mm.mode; nm.mtime = 0; nm.uid = 0; nm.gid = 0
             nm.type = mm.type; nm.linkname = mm.linkname
@@ -219,7 +274,7 @@ def build_from_live(out_deb):
 
     # 构建 data.tar.xz（仅额外文件，因为 live 模式是从零打）
     databuf = io.BytesIO()
-    with tarfile.open(fileobj=databuf, mode='w:xz') as tout:
+    with tarfile.open(fileobj=databuf, mode='w:xz', format=tarfile.GNU_FORMAT) as tout:
         for arc, payload, mode in extra:
             ti = tarfile.TarInfo(arc)
             ti.mode = mode; ti.mtime = 0; ti.uid = 0; ti.gid = 0
@@ -235,7 +290,7 @@ def build_from_live(out_deb):
             with open(p, 'rb') as fh:
                 ctrl_files[fn] = fh.read()
     cbuf = io.BytesIO()
-    with tarfile.open(fileobj=cbuf, mode='w:xz') as tout:
+    with tarfile.open(fileobj=cbuf, mode='w:xz', format=tarfile.GNU_FORMAT) as tout:
         for fn, payload in ctrl_files.items():
             ti = tarfile.TarInfo(fn); ti.mode = 0o644 if fn == 'control' else 0o755
             ti.mtime = 0; ti.uid = 0; ti.gid = 0; ti.size = len(payload)
@@ -416,6 +471,7 @@ def main():
         build_patched(a.reference, a.output, a.source)
     else:
         build_from_reference(a.reference, a.output)
+    check_deb_format(a.output)
     verify(a.output)
 
 if __name__ == '__main__':
