@@ -411,6 +411,13 @@ namespace WidgetHub
         public string HtmlUrl = "";
         public string AssetUrl = "";
         public string AssetName = "";
+        public long AssetId = 0;
+
+        /// <summary>私有仓库必须走 API 附件接口：browser_download_url 会 302 到 S3，
+        /// 而 .NET 的 HttpClient 跳转时会丢掉 Authorization 头，下载直接 404。</summary>
+        public string AssetApiUrl => AssetId > 0
+            ? "https://api.github.com/repos/" + AppInfo.RepoOwner + "/" + AppInfo.RepoName + "/releases/assets/" + AssetId
+            : "";
     }
 
     /// <summary>从 GitHub Releases 检查新版本并下载安装包。</summary>
@@ -445,6 +452,7 @@ namespace WidgetHub
                         {
                             info.AssetName = name;
                             info.AssetUrl = a["browser_download_url"]?.ToString() ?? "";
+                            if (a["id"] != null && long.TryParse(a["id"]!.ToString(), out long aid)) info.AssetId = aid;
                             break;
                         }
                     }
@@ -457,14 +465,19 @@ namespace WidgetHub
         /// <summary>下载新版本安装包，返回本地路径。</summary>
         public static async Task<string?> DownloadAsync(UpdateInfo info, string token, Action<int>? progress = null)
         {
-            if (string.IsNullOrEmpty(info.AssetUrl)) return null;
+            // 优先用 API 附件接口（私有仓库必需），退回 browser_download_url
+            string url = info.AssetApiUrl;
+            bool apiMode = !string.IsNullOrEmpty(url);
+            if (!apiMode) url = info.AssetUrl;
+            if (string.IsNullOrEmpty(url)) return null;
             string dir = Path.Combine(Path.GetTempPath(), "WidgetHubUpdate");
             Directory.CreateDirectory(dir);
             string path = Path.Combine(dir, AppInfo.AssetName);
             try
             {
                 using var client = NewClient();
-                using var req = new HttpRequestMessage(HttpMethod.Get, info.AssetUrl);
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                if (apiMode) req.Headers.Accept.ParseAdd("application/octet-stream");
                 if (!string.IsNullOrWhiteSpace(token))
                     req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("token", token.Trim());
                 using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
