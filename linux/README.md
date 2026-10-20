@@ -157,6 +157,19 @@ sudo bash linux/install.sh rollback
 
 ---
 
+## 6.5 清理旧版单独安装的挂件/任务栏工具
+
+装本套件之前，若曾把「划选复制 / 鼠标拖尾 / 截图OCR」单独装进系统
+（旧包名 `copy-toolbar`、`mouse-trail`、`shot-ocr`），它们的文件早已由本套件接管，
+dpkg 里只剩无用记录。一键清理（自动重建自启动项，功能不受影响）：
+
+```bash
+sudo bash clean-old-widgets.sh
+```
+
+> `quicklaunch`、`echoflow`、`zdm`、音乐软件等是其他工具，与本套件无关，脚本不会动。
+> 连套件一起卸载：`sudo apt purge desktop-widgets-suite`。
+
 ## 7. 在其他 Linux 机器上安装
 
 本 `.deb` 是**自包含安装包**：17 个挂件 + 控制中心 + 字体跟随修复全部打包在一起，
