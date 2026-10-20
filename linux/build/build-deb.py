@@ -14,7 +14,7 @@ Linux 端 .deb 纯标准库构建器（不依赖 dpkg-deb / ar / tar 等命令�
 
 始终输出一个内容自洽（md5sums 与 data.tar 一致）、可被 `dpkg -i` 安装的 .deb。
 """
-import tarfile, io, hashlib, os, sys, argparse, gzip
+import tarfile, io, hashlib, os, sys, argparse, gzip, re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                      # linux/
@@ -68,7 +68,8 @@ def should_skip(nm):
         return True
     return False
 
-def rewrite_tar(in_blob, skip_pred, collect_md5=None, extra_files=None):
+def rewrite_tar(in_blob, skip_pred, collect_md5=None, extra_files=None,
+                patch_fn=None):
     buf = io.BytesIO()
     with tarfile.open(fileobj=io.BytesIO(in_blob), mode='r:xz') as tin, \
          tarfile.open(fileobj=buf, mode='w:xz') as tout:
@@ -86,13 +87,15 @@ def rewrite_tar(in_blob, skip_pred, collect_md5=None, extra_files=None):
             newm.linkname = m.linkname
             if m.isfile():
                 data = tin.extractfile(m).read()
+                if patch_fn is not None:
+                    data = patch_fn(nm, data)
                 newm.size = len(data)
                 tout.addfile(newm, io.BytesIO(data))
                 if collect_md5 is not None:
                     collect_md5(nm, data)
             else:
                 tout.addfile(newm)
-        # 追加额外源文件（--from-live 模式使用）
+        # 追加额外源文件（--patch 模式注入 hub / 字体解析 / 别名）
         if extra_files:
             for arcname, payload, mode in extra_files:
                 ti = tarfile.TarInfo(arcname)
@@ -102,6 +105,8 @@ def rewrite_tar(in_blob, skip_pred, collect_md5=None, extra_files=None):
                 ti.gid = 0
                 ti.size = len(payload)
                 tout.addfile(ti, io.BytesIO(payload))
+                if collect_md5 is not None:
+                    collect_md5(arcname, payload)
     return buf.getvalue()
 
 def build_from_reference(ref_deb, out_deb):
@@ -248,6 +253,117 @@ def build_from_live(out_deb):
         f.write(out)
     print("写出:", out_deb, len(out), "bytes")
 
+# ── 字体补丁：把写死的字体族名改为「运行时读取系统默认字体」 ──
+_FONT_RE = re.compile(
+    r"^(?P<ind>\s*)(?P<name>FONT|[A-Za-z_]*_FONT)\s*=\s*"
+    r"'(?P<fam>FZSongHei-B07|Sans)(?P<rest>[^']*)'(?P<tail>.*)$",
+    re.M,
+)
+
+_IMPORT_BLOCK = (
+    "import sys as _wfsys\n"
+    "_wf_path = '/usr/local/lib/desktop-widgets-suite'\n"
+    "if _wf_path not in _wfsys.path:\n"
+    "    _wfsys.path.insert(0, _wf_path)\n"
+    "from widget_font import SYS_FONT as _SYS_FONT\n"
+)
+
+# 需要打字体补丁的目标文件（data tar 内相对路径）
+FONT_PATCH_TARGETS = {
+    'usr/local/lib/desktop-calendar/calendar_widget.py',
+    'usr/local/lib/desktop-calendar/note_editor.py',
+    'opt/desktop-monitor/monitor.py',
+    'usr/local/lib/desktop-music/music.py',
+    'usr/local/lib/desktop-notes/notes.py',
+    'usr/local/lib/desktop-radio/radio.py',
+    'usr/local/lib/desktop-rss/rss.py',
+    'usr/local/lib/desktop-timer/timer_alarm_widget.py',
+    'usr/local/lib/desktop-wallet/wallet.py',
+    'usr/local/lib/desktop-weather/widget.py',
+    'usr/local/lib/edge-scroll-control/main.py',
+    'usr/local/lib/monitor-input-switch/main.py',
+}
+
+# 注入的新文件：(仓库内相对路径, data tar 内目标路径, 权限)
+INJECT_FILES = [
+    ('common/widget_font.py', 'usr/local/lib/desktop-widgets-suite/widget_font.py', 0o644),
+    ('fonts/99-desktop-widgets.conf', 'etc/fonts/conf.d/99-desktop-widgets.conf', 0o644),
+    ('hub/hub.py', 'usr/local/lib/desktop-widgets-hub/hub.py', 0o644),
+    ('hub/desktop-widgets-hub', 'usr/local/bin/desktop-widgets-hub', 0o755),
+    ('hub/desktop-widgets-hub.desktop', 'usr/share/applications/desktop-widgets-hub.desktop', 0o644),
+]
+
+
+def patch_widget_source(name, data):
+    try:
+        text = data.decode('utf-8')
+    except Exception:
+        return data
+    if '_SYS_FONT' in text:
+        return data  # 已打过补丁，幂等
+    # 在 shebang 之后插入 import 块
+    lines = text.split('\n')
+    insert_at = 0
+    if lines and lines[0].startswith('#!'):
+        insert_at = 1
+    for i, ln in enumerate(lines):
+        if ln.startswith('"""') or ln.startswith("'''"):
+            # 若紧接 shebang 后是模块 docstring，import 放到 docstring 之后更安全
+            if i == insert_at:
+                insert_at = i + 1
+    lines[insert_at:insert_at] = _IMPORT_BLOCK.rstrip('\n').split('\n')
+    text = '\n'.join(lines)
+    text = _FONT_RE.sub(r"\g<ind>\g<name> = _SYS_FONT + '\g<rest>'\g<tail>", text)
+    return text.encode('utf-8')
+
+
+def build_patched(ref_deb, out_deb, src_root):
+    with open(ref_deb, 'rb') as f:
+        raw = f.read()
+    print("参考包:", ref_deb, len(raw), "bytes")
+    members = parse_ar(raw)
+    m = {norm(r.decode('utf-8', 'replace').strip()): d for r, d in members}
+    data_name = [k for k in m if k.startswith('data.tar')][0]
+    ctrl_name = [k for k in m if k.startswith('control.tar')][0]
+    bin_name = 'debian-binary'
+    data_blob = m[data_name]
+    ctrl_blob = m[ctrl_name]
+    debian_bin = m[bin_name]
+
+    extra = []
+    for src_rel, arcname, mode in INJECT_FILES:
+        p = os.path.join(src_root, src_rel)
+        with open(p, 'rb') as fh:
+            extra.append((arcname, fh.read(), mode))
+    print("注入新文件:", len(extra))
+
+    md5lines = []
+    def collector(nm, data):
+        md5lines.append("%s  %s\n" % (hashlib.md5(data).hexdigest(), nm))
+
+    def patch_fn(nm, data):
+        if nm in FONT_PATCH_TARGETS:
+            return patch_widget_source(nm, data)
+        return data
+
+    new_data = rewrite_tar(data_blob, should_skip, collector,
+                           extra_files=extra, patch_fn=patch_fn)
+    print("data 文件保留:", len(md5lines))
+
+    md5content = "".join(md5lines).encode('utf-8')
+    new_ctrl = rebuild_control(ctrl_blob, md5content)
+
+    rawmap = {norm(r.decode('utf-8', 'replace').strip()): r for r, d in members}
+    out = write_ar([
+        (rawmap[bin_name], debian_bin),
+        (rawmap[ctrl_name], new_ctrl),
+        (rawmap[data_name], new_data),
+    ])
+    with open(out_deb, 'wb') as f:
+        f.write(out)
+    print("写出:", out_deb, len(out), "bytes")
+
+
 def verify(deb):
     with open(deb, 'rb') as f:
         raw = f.read()
@@ -286,6 +402,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--reference', default=DEFAULT_REF)
     ap.add_argument('--from-live', action='store_true')
+    ap.add_argument('--patch', action='store_true',
+                    help='在参考包基础上注入 hub / 字体解析 / 别名，并补丁挂件字体')
+    ap.add_argument('--source', default=ROOT, help='注入文件的来源根目录(linux/)')
     ap.add_argument('--output', default=DEFAULT_REF)
     ap.add_argument('--check', action='store_true', help='仅校验 --output 的 md5sums 自洽性')
     a = ap.parse_args()
@@ -293,6 +412,8 @@ def main():
         sys.exit(0 if verify(a.output) else 1)
     if a.from_live:
         build_from_live(a.output)
+    elif a.patch:
+        build_patched(a.reference, a.output, a.source)
     else:
         build_from_reference(a.reference, a.output)
     verify(a.output)

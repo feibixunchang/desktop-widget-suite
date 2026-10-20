@@ -81,7 +81,12 @@ bash release.sh 1.1                # 改版本号 → 构建 → 提交 → 推�
 - **Windows**：`WidgetHubSetup.exe`（见上方「发布新版本」）
 - **Linux**：`linux/dist/desktop-widgets-suite_2.9.74_all.deb`
 
-Linux 端同样贯彻「一个软件统管全部桌面挂件」的理念：由自愈守护进程
-`linux/supervisor/supervisor.py` 保活 17 个挂件，任一崩溃自动拉起。
+Linux 端同样贯彻「一个软件统管全部桌面挂件」的理念：
+
+- **桌面挂件控制中心** `desktop-widgets-hub`：图形界面，统管 17 个挂件
+  （启用/停用、启动/停止/重启、全部启动/停止、重启守护）。相当于 Linux 版 WidgetHub 主界面。
+- **自愈守护进程** `linux/supervisor/supervisor.py` 保活 17 个挂件，任一崩溃自动拉起。
+- **字体跟随系统默认**：挂件运行时读取系统「界面默认字体」（方正宋黑），不再写死。
+
 构建、安装（含 Deepin 25 不可变系统的 `deepin-immutable-ctl admin exec` 安装方式）、
 回滚说明均在 `linux/README.md` 与 `linux/install.sh`。

@@ -7,6 +7,8 @@
 #    sudo bash install.sh status      # 查看守护与挂件进程
 #  说明: 本脚本必须在【本机终端】以 root 运行（不可变系统需要 admin exec）。
 #        它会先停掉所有桌面挂件，再安装新 .deb，最后重启守护以加载新包。
+#  装完后: 打开「桌面挂件控制中心」(命令 desktop-widgets-hub 或开始菜单) 统管各挂件。
+#  字体: 本版挂件运行时读取系统默认界面字体(方正宋黑)，不再写死。
 #==================================================================
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -34,8 +36,8 @@ stop_widgets() {
 install_pkg() {
   if [ ! -f "$DEB" ]; then echo "找不到安装包: $DEB"; exit 1; fi
   stop_widgets
-  echo "==> 安装新包 (deepin-immutable-ctl admin exec)"
-  deepin-immutable-ctl admin exec -- apt-get install -y "$DEB"
+  echo "==> 安装新包 (deepin-immutable-ctl admin exec, dpkg -i 强制重装)"
+  deepin-immutable-ctl admin exec -- dpkg -i "$DEB" 2>&1 || deepin-immutable-ctl admin exec -- apt-get install -y -f
   echo "==> 重启守护以加载新包"
   nohup python3 "$SUP" >/dev/null 2>&1 &
   sleep 6
@@ -61,6 +63,7 @@ status() {
   echo "==> 挂件进程数: $(pgrep -fc 'desktop-' 2>/dev/null || echo 0)"
   echo "==> 最近守护日志"
   tail -n 8 "$HOME/.local/share/desktop-widgets-supervisor/supervisor.log" 2>/dev/null || echo "    (无日志)"
+  echo "==> 控制中心: 在终端运行 desktop-widgets-hub 或开始菜单打开「桌面挂件控制中心」"
 }
 
 case "${1:-status}" in
