@@ -1,0 +1,13 @@
+#!/bin/bash
+export PATH=/usr/local/bin:$PATH
+_wgt_off="$HOME/.config/desktop-widgets/desktop-notes.off"
+mkdir -p "$(dirname "$_wgt_off")"
+rm -f "$_wgt_off"
+_wgt_t0=$(date +%s)
+python3 /usr/local/lib/desktop-notes/notes.py "$@"
+_wgt_rc=$?
+_wgt_dt=$(( $(date +%s) - _wgt_t0 ))
+if [ "$_wgt_rc" -eq 0 ] && [ "$_wgt_dt" -ge 10 ]; then
+    : > "$_wgt_off"
+fi
+exit $_wgt_rc

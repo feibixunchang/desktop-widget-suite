@@ -1,0 +1,144 @@
+#!/bin/bash
+# 安装后：1) 应用任务栏外观 2) 为每个用户写开机自启 3) 立即启动
+AUTOSTART_LIST="desktop-calendar|/usr/local/bin/desktop-calendar|桌面日历挂件
+desktop-frame|/usr/local/bin/desktop-frame|桌面相框挂件
+desktop-monitor|/usr/local/bin/desktop-monitor|桌面监控挂件
+desktop-movie|/usr/local/bin/desktop-movie|桌面视频挂件
+desktop-music|/usr/local/bin/desktop-music|桌面音乐挂件
+desktop-notes|/usr/local/bin/desktop-notes|桌面便签挂件
+desktop-radio|/usr/local/bin/desktop-radio|桌面收音机挂件
+desktop-rss|/usr/local/bin/desktop-rss|桌面RSS挂件
+desktop-timer|/usr/local/bin/desktop-timer|桌面计时器挂件
+desktop-weather|/usr/local/bin/desktop-weather|桌面天气挂件
+edge-scroll-control|/usr/local/bin/edge-scroll-control|边缘滚轮控制
+desktop-wallet|/usr/local/bin/desktop-wallet|桌面记账挂件
+monitor-input-switch|/usr/local/bin/monitor-input-switch|显示器输入切换
+taskbar-info|/usr/bin/taskbar-info|任务栏信息条
+mouse-trail|/usr/bin/mouse-trail|鼠标炫彩拖尾
+shot-ocr|/usr/bin/shot-ocr --autostart|截图 OCR 翻译
+copy-toolbar|/usr/bin/copy-toolbar|划选复制工具条
+desktop-widgets-supervisor|/usr/local/bin/desktop-widgets-supervisor|挂件自愈守护"
+
+for home in /home/*; do
+    [ -d "$home" ] || continue
+    user=$(basename "$home")
+    uid=$(id -u "$user" 2>/dev/null) || continue
+    case "$uid" in ''|*[!0-9]*) continue ;; esac
+    [ "$uid" -ge 1000 ] || continue
+    adir="$home/.config/autostart"
+    mkdir -p "$adir" 2>/dev/null || continue
+    # 修复 autostart 目录属主/权限: 曾被置为 root:700, 桌面会话(用户身份)
+    # 读不到自启动项, 重启后所有挂件不显示
+    chown "$user:$user" "$adir" 2>/dev/null || true
+    chmod 755 "$adir" 2>/dev/null || true
+    # 清掉失效/已移除挂件的自启项（LobeHub 钱包、旧版热键启动器）
+    rm -f "$adir/{name}.desktop" 2>/dev/null
+    rm -f "$adir/lobehub-wallet.desktop" 2>/dev/null
+    rm -f "$adir/hotkey-launcher.desktop" 2>/dev/null
+    # 结束已移除的旧版热键启动器（新版 quicklaunch 已替代）
+    if command -v pkill >/dev/null 2>&1; then
+        pkill -KILL -u "$uid" -f "/usr/local/lib/hotkey-launcher/hotkey-launcher.py" 2>/dev/null || true
+    fi
+    # 清掉旧版 mouse-trail 残留（否则会与新版同名的启动菜单项重复，且 PATH 里旧版优先）
+    if [ -e /usr/local/bin/mouse-trail ] || [ -e /usr/local/lib/mouse-trail ] \
+       || [ -e /usr/local/share/applications/mouse-trail.desktop ]; then
+        mkdir -p /usr/local/lib/.old-mouse-trail 2>/dev/null
+        mv -f /usr/local/bin/mouse-trail /usr/local/lib/.old-mouse-trail/ 2>/dev/null
+        mv -f /usr/local/lib/mouse-trail /usr/local/lib/.old-mouse-trail/lib 2>/dev/null
+        mv -f /usr/local/share/applications/mouse-trail.desktop \
+              /usr/local/lib/.old-mouse-trail/ 2>/dev/null
+    fi
+    while IFS='|' read -r key exec name; do
+        [ -n "$key" ] || continue
+        cat > "$adir/$key.desktop" <<DESK
+[Desktop Entry]
+Type=Application
+Name=$name
+Exec=$exec
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=2
+NoDisplay=true
+DESK
+        chown "$user" "$adir/$key.desktop" 2>/dev/null
+        chmod 644 "$adir/$key.desktop" 2>/dev/null
+    done <<< "$AUTOSTART_LIST"
+
+    # 任务栏外观
+    bus=""
+    [ -S "/run/user/$uid/bus" ] && bus="unix:path=/run/user/$uid/bus"
+    if command -v runuser >/dev/null 2>&1; then
+        runuser -u "$user" -- env HOME="$home" DBUS_SESSION_BUS_ADDRESS="$bus" \
+            python3 /usr/lib/deepin-taskbar-look/apply.py >/dev/null 2>&1
+    fi
+
+    # 立即启动（已在运行的不重复启动）
+    disp=""
+    for d in 0 1 2 3; do
+        [ -e "/tmp/.X11-unix/X$d" ] && { disp=":$d"; break; }
+    done
+    if [ -n "$disp" ] && command -v runuser >/dev/null 2>&1; then
+        while IFS='|' read -r key exec name; do
+            [ -n "$key" ] || continue
+            if [ "$key" = "taskbar-info" ]; then
+                pkill -KILL -u "$uid" -f "/usr/lib/taskbar-info/taskbar-info.py" 2>/dev/null || true
+                rm -f "$home/.cache/taskbar-info.lock" 2>/dev/null || true
+                rm -rf "/usr/lib/taskbar-info/__pycache__" 2>/dev/null || true
+                sleep 1
+            elif [ "$key" = "desktop-monitor" ]; then
+                pkill -KILL -u "$uid" -f "/opt/desktop-monitor/monitor.py" 2>/dev/null || true
+                rm -rf "/opt/desktop-monitor/__pycache__" 2>/dev/null || true
+                sleep 1
+            fi
+            # 用命令基名匹配进程(兼容 wrapper 脚本与被 exec 的真实脚本路径),
+            # 避免 repeat 安装时把同一个挂件重复启动
+            # 只匹配真正的程序进程（python3/node 开头），避免匹配到
+            # 恰好命令行里含同名字符串的其它命令
+            pat="/$(basename "$(echo "$exec" | awk '{print $NF}')")"
+            pat=${pat%.py}
+            if pgrep -u "$uid" -f "^(python3|python|node|/usr/bin/python3).*$pat" >/dev/null 2>&1; then
+                continue
+            fi
+            # 关键: 必须在桌面会话的 mount namespace 里启动,
+            # 否则读不到用户后来挂载的移动硬盘/U盘
+            sess_pid=""
+            for cand in dde-shell dde-file-manager dde-desktop Xorg; do
+                sess_pid=$(pgrep -u "$uid" -x "$cand" 2>/dev/null | head -1)
+                [ -n "$sess_pid" ] && break
+            done
+            if [ -n "$sess_pid" ] && command -v nsenter >/dev/null 2>&1; then
+                setsid nsenter --mount="/proc/$sess_pid/ns/mnt" -- \
+                    runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+                    DISPLAY="$disp" XAUTHORITY="$home/.Xauthority" \
+                    nohup $exec >/dev/null 2>&1 < /dev/null &
+            else
+                # 补上 XDG_RUNTIME_DIR, 否则 pactl 等连不上音频服务
+                # (表现为边缘滚轮/音量相关功能失效, OSD 一直显示 0%)
+                runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+                    DISPLAY="$disp" XAUTHORITY="$home/.Xauthority" \
+                    setsid nohup $exec >/dev/null 2>&1 < /dev/null &
+            fi
+            sleep 0.4
+        done <<< "$AUTOSTART_LIST"
+    fi
+done
+
+# ── 修复外接 USB 移动硬盘/U盘偶发掉线 ──
+# AMD USB4 XHCI 控制器开启 USB 自动挂起后，唤醒失败会导致外接存储设备
+# 从总线消失，必须物理拔插才能恢复。这里禁止 USB 设备自动挂起。
+if [ -d /etc/udev/rules.d ] && [ -w /etc/udev/rules.d ]; then
+    cat > /etc/udev/rules.d/99-usb-no-autosuspend.rules <<'USBRULE'
+# 禁止 USB 设备自动挂起（修复 AMD USB4 控制器唤不醒外接硬盘的问题）
+# 由 desktop-widgets-suite 安装时写入
+ACTION=="add", SUBSYSTEM=="usb", TEST=="power/control", ATTR{power/control}="on"
+USBRULE
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload-rules 2>/dev/null || true
+        udevadm trigger --subsystem-match=usb 2>/dev/null || true
+    fi
+fi
+# 对当前已插入的 USB 设备立即生效
+for pc in /sys/bus/usb/devices/*/power/control; do
+    [ -w "$pc" ] || continue
+    echo on > "$pc" 2>/dev/null || true
+done
+exit 0

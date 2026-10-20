@@ -1,0 +1,12 @@
+#!/bin/bash
+case "$1" in
+    remove|purge)
+        for pat in /usr/local/lib/desktop- /usr/local/lib/edge-scroll-control \
+                   /usr/local/lib/hotkey-launcher /usr/local/lib/lobehub-wallet \
+                   /usr/local/lib/monitor-input-switch /opt/desktop-monitor/monitor.py \
+                   /usr/lib/taskbar-info /usr/lib/mouse-trail /usr/lib/deepin-taskbar-look; do
+            pkill -f "$pat" 2>/dev/null
+        done
+        ;;
+esac
+exit 0

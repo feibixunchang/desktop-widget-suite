@@ -1,0 +1,12 @@
+Package: desktop-widgets-suite
+Version: 2.9.74
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: ooo <desktop-widgets-suite@users.noreply.github.com>
+Installed-Size: 8380
+Replaces: mouse-trail, taskbar-info, deepin-taskbar-look, desktop-tools, desktop-weather, desktop-widgets, edge-scroll-control, hotkey-launcher, lobehub-wallet, monitor-input-switch, taskbar-clock, shot-ocr, copy-toolbar, system-cleaner
+Depends: python3 (>= 3.8), python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, gir1.2-pango-1.0, python3-xlib, fonts-noto-cjk
+Conflicts: mouse-trail, taskbar-info, deepin-taskbar-look, desktop-tools, desktop-weather, desktop-widgets, edge-scroll-control, hotkey-launcher, lobehub-wallet, monitor-input-switch, taskbar-clock, shot-ocr, copy-toolbar, system-cleaner
+Description: 桌面挂件合集包
+ 包含全部桌面挂件、任务栏工具和桌面收音机修正版：固定使用 dtbox 播放源，弹窗置顶并缩窄显示；开机/注销/重启后不自动播放，只有点击播放或选台才出声；播放中断会自动重连；选台弹窗点击桌面空白处自动收回。
