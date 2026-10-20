@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""检测鼠标侧键事件: 打印所有非同步事件, 定位侧键信号"""
+import glob, os, re, select, struct, time
+
+paths = sorted(glob.glob("/dev/input/event*"))
+names = {}
+try:
+    cur = None
+    for line in open("/proc/bus/input/devices"):
+        m = re.match(r"N: Name=\"(.*)\"", line)
+        if m: cur = m.group(1)
+        m = re.match(r"H: Handlers=.*event(\d+)", line)
+        if m and cur: names["event" + m.group(1)] = cur
+except Exception:
+    pass
+fds = []
+for p in paths:
+    try:
+        fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK)
+        fds.append((fd, os.path.basename(p)))
+    except Exception:
+        pass
+print("监听 %d 个输入设备, 请先点一下鼠标左键确认工具正常, 然后按【上侧键】【下侧键】, 40秒后结束:" % len(fds))
+tnames = {0:"SYN", 1:"KEY", 2:"REL", 3:"ABS", 4:"MSC", 17:"LED"}
+last_key = None
+last_t = 0.0
+deadline = time.time() + 40
+while time.time() < deadline:
+    r, _, _ = select.select([f[0] for f in fds], [], [], 0.2)
+    for fd in r:
+        try:
+            data = os.read(fd, 64)
+            while len(data) >= 24:
+                sec, usec, t, code, val = struct.unpack("llHHI", data[:24])
+                data = data[24:]
+                if t == 0:
+                    continue
+                dev = [e for f, e in fds if f == fd][0]
+                dname = names.get(dev, dev)[:20]
+                now = time.time()
+                k = (dev, t, code)
+                if k != last_key or now - last_t > 0.5:
+                    print("设备 %-7s %-20s type=%s(%d) code=%-4d val=%d" %
+                          (dev, dname, tnames.get(t, "?"), t, code, val), flush=True)
+                last_key, last_t = k, now
+        except Exception:
+            pass
+print("检测结束")

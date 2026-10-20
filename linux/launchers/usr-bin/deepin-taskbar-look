@@ -1,0 +1,3 @@
+#!/bin/bash
+# 应用“任务栏固定纯黑/透明 + 托盘图标恒白”，不需要管理员权限
+exec python3 /usr/lib/deepin-taskbar-look/apply.py

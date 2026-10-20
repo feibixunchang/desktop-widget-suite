@@ -71,3 +71,17 @@ bash release.sh 1.1                # 改版本号 → 构建 → 提交 → 推�
 5. **net48 里 `System.Net.Http` 只是类型转发外观**，还要引用 `System.Net.Http.WebRequest`；隐式 using 不含 `System.Net.Http`。
 6. **TimeSpan 不支持 `HH` 格式符**（只有 `hh`），DateTime 才支持。
 7. **未签名的桌面小工具会被 Defender 判成 PUA 直接删除** → 安装时加排除项。
+
+---
+
+## Linux 端（Deepin 25 不可变系统）
+
+仓库同时维护 Linux 版本，目标与第一版 `v1.0` Release **并列提供 Windows 与 Linux 两种安装包**：
+
+- **Windows**：`WidgetHubSetup.exe`（见上方「发布新版本」）
+- **Linux**：`linux/dist/desktop-widgets-suite_2.9.74_all.deb`
+
+Linux 端同样贯彻「一个软件统管全部桌面挂件」的理念：由自愈守护进程
+`linux/supervisor/supervisor.py` 保活 17 个挂件，任一崩溃自动拉起。
+构建、安装（含 Deepin 25 不可变系统的 `deepin-immutable-ctl admin exec` 安装方式）、
+回滚说明均在 `linux/README.md` 与 `linux/install.sh`。

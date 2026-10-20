@@ -1,0 +1,3 @@
+#!/bin/bash
+export PATH=/usr/local/bin:/usr/bin:$PATH
+exec python3 /usr/lib/system-cleaner/main.py "$@"

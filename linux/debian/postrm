@@ -1,0 +1,15 @@
+#!/bin/bash
+case "$1" in
+    remove|purge)
+        for home in /home/*; do
+            [ -d "$home" ] || continue
+            for k in desktop-calendar desktop-frame desktop-monitor desktop-movie \
+                     desktop-music desktop-notes desktop-radio desktop-rss desktop-timer \
+                     desktop-weather edge-scroll-control hotkey-launcher lobehub-wallet \
+                     monitor-input-switch taskbar-info mouse-trail; do
+                rm -f "$home/.config/autostart/$k.desktop" 2>/dev/null
+            done
+        done
+        ;;
+esac
+exit 0
