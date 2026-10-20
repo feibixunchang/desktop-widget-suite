@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=桌面挂件控制中心
+Comment=统一管理全部桌面挂件（启用/停用/重启）
+Exec=desktop-widgets-hub
+Icon=preferences-system
+Terminal=false
+Categories=Utility;Settings;
+Keywords=widget;desktop;挂件;控制中心;

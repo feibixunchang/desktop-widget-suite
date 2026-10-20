@@ -1,0 +1,3 @@
+#!/bin/bash
+export PATH=/usr/local/bin:$PATH
+exec python3 /usr/local/lib/desktop-widgets-hub/hub.py "$@"
