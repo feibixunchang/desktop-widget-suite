@@ -193,7 +193,8 @@ class NoteEditor(Gtk.Window):
         for pc in NOTE_PRESETS:
             tb = Gtk.ToggleButton()
             lb = Gtk.Label()
-            lb.set_markup('<span foreground="%s" font="%s 14" % _SYS_FONT>●</span>' % pc)
+            lb.set_markup('<span foreground="%s" font="%s">●</span>'
+                          % (pc, _SYS_FONT + ' 14'))
             tb.add(lb)
             tb.connect('toggled', self.on_color, pc)
             cbox.pack_start(tb, False, False, 0)

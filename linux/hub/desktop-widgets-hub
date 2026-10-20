@@ -25,7 +25,7 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = '2.9.79'
+VERSION = '2.9.80'
 APP_ID = 'com.deepin.DesktopWidgetsHub'
 PKG_NAME = 'desktop-widgets-suite'
 DEFAULT_REPO = 'feibixunchang/desktop-widget-suite'
