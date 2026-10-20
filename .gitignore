@@ -1,8 +1,2 @@
-bin/
-obj/
-out/
-publish48/
-publish/
-stage/
-*.pdb
-WidgetHubSetup-*.exe
+__pycache__/
+*.pyc
