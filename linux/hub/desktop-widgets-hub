@@ -25,7 +25,7 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = '2.9.78'
+VERSION = '2.9.79'
 APP_ID = 'com.deepin.DesktopWidgetsHub'
 PKG_NAME = 'desktop-widgets-suite'
 DEFAULT_REPO = 'feibixunchang/desktop-widget-suite'
@@ -343,14 +343,12 @@ def _ver_tuple(s):
 
 
 def installed_version():
-    try:
-        out = subprocess.check_output(
-            ['dpkg-query', '-W', '-f=${Version}', PKG_NAME],
-            stderr=subprocess.DEVNULL, timeout=5).decode().strip()
-        if out:
-            return out
-    except Exception:
-        pass
+    """当前【正在运行】的版本。
+
+    以前读 dpkg-query 的文件版本，会出现「标题栏显示旧版、检查更新却说
+    已是最新」的矛盾（安装完新包但旧进程还在内存里）。改为返回本进程的
+    VERSION：检查更新基于真实运行版本，装完重启后自然一致。
+    """
     return VERSION
 
 

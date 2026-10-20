@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-import os
-from widget_font import SYS_FONT as _SYS_FONT
 # -*- coding: utf-8 -*-
 """桌面相框挂件 - 背景透明, 幻灯片播放图片文件夹"""
+import os
+from widget_font import SYS_FONT as _SYS_FONT
 import datetime
 import json
 import os

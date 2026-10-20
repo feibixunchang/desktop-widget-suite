@@ -12,7 +12,7 @@
 #==================================================================
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-DEB="$HERE/dist/desktop-widgets-suite_2.9.78_all.deb"
+DEB="$HERE/dist/desktop-widgets-suite_2.9.79_all.deb"
 ROLLBACK="/home/user/.desktop-widgets-rollback/20261020-184139"
 SUP="/usr/local/lib/desktop-widgets-supervisor/supervisor.py"
 SUP_PIDF="/home/user/.local/share/desktop-widgets-supervisor/supervisor.pid"
@@ -55,6 +55,12 @@ install_pkg() {
   }
   # postinst 会为本机用户拉起守护与挂件；脚本不再手动启动，避免重复 / 以 root 运行
   sleep 8
+  # 关掉安装前就在运行的旧版控制中心：旧进程内存里是旧代码，
+  # 不关会继续显示旧版本号、且「检查更新」判断失真。
+  if pgrep -f "desktop-widgets-hub" >/dev/null 2>&1; then
+    pkill -f "desktop-widgets-hub" 2>/dev/null || true
+    echo "==> 已关闭旧版控制中心，重新打开「桌面挂件控制中心」即为新版本"
+  fi
   # 兜底：若守护未自动拉起，则以登录用户身份启动
   if ! pgrep -f desktop-widgets-supervisor >/dev/null 2>&1; then
     echo "==> 守护未自动拉起，尝试以用户身份启动"
