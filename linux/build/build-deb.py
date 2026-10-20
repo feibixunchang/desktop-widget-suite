@@ -137,6 +137,9 @@ def rewrite_tar(in_blob, skip_pred, collect_md5=None, extra_files=None,
         seen = set()
         for m in tin.getmembers():
             nm = norm(m.name)
+            if not nm:
+                # './' 之类的根目录条目：dpkg 会因「空文件名」直接致命报错
+                continue
             if skip_pred(nm):
                 print("  skip:", nm)
                 continue
