@@ -29,10 +29,10 @@ Deepin 25 是 **不可变系统**（ostree），系统目录只读，必须用 `
 在可写层安装。在**本机终端**执行：
 
 ```bash
-# 安装包位于本仓库 linux/dist/desktop-widgets-suite_2.9.75_all.deb
+# 安装包位于本仓库 linux/dist/desktop-widgets-suite_2.9.76_all.deb
 # 用 dpkg -i 强制重装（版本号不变时 apt 会跳过，dpkg 会覆盖文件）
 sudo deepin-immutable-ctl admin exec -- dpkg -i \
-    /path/to/linux/dist/desktop-widgets-suite_2.9.75_all.deb
+    /path/to/linux/dist/desktop-widgets-suite_2.9.76_all.deb
 ```
 
 安装后守护进程会随登录自启；若想立刻生效（不重登录）：
@@ -51,7 +51,7 @@ nohup python3 /usr/local/lib/desktop-widgets-supervisor/supervisor.py >/dev/null
 linux/
 ├── README.md                 本文件
 ├── dist/
-│   └── desktop-widgets-suite_2.9.75_all.deb   # Linux 安装包（v1.0 Release 资源）
+│   └── desktop-widgets-suite_2.9.76_all.deb   # Linux 安装包（v1.0 Release 资源）
 ├── build/
 │   └── build-deb.py          # 纯标准库 .deb 构建器（无需 dpkg-deb/ar/tar 命令）
 ├── debian/                   # 打包元数据：control / postinst / prerm / postrm
@@ -78,20 +78,20 @@ linux/
 ```bash
 # 方式 A：以现有参考包为基准，剔除运行期垃圾（.pyc / .pid / .log）并重算 md5sums
 python3 build/build-deb.py \
-    --reference dist/desktop-widgets-suite_2.9.75_all.deb \
-    --output    dist/desktop-widgets-suite_2.9.75_all.deb
+    --reference dist/desktop-widgets-suite_2.9.76_all.deb \
+    --output    dist/desktop-widgets-suite_2.9.76_all.deb
 
 # 方式 A+：在 A 基础上注入「控制中心 + 字体解析模块 widget_font.py」，
 #          并把各挂件写死的字体改为「运行时读取系统默认字体」
 python3 build/build-deb.py --patch \
-    --reference dist/desktop-widgets-suite_2.9.75_all.deb \
-    --output    dist/desktop-widgets-suite_2.9.75_all.deb
+    --reference dist/desktop-widgets-suite_2.9.76_all.deb \
+    --output    dist/desktop-widgets-suite_2.9.76_all.deb
 
 # 方式 B：直接在已安装的本机上，以「已安装的挂件目录」为源重建
-python3 build/build-deb.py --from-live --output dist/desktop-widgets-suite_2.9.75_all.deb
+python3 build/build-deb.py --from-live --output dist/desktop-widgets-suite_2.9.76_all.deb
 
 # 仅校验产出包的 md5sums 自洽性
-python3 build/build-deb.py --check --output dist/desktop-widgets-suite_2.9.75_all.deb
+python3 build/build-deb.py --check --output dist/desktop-widgets-suite_2.9.76_all.deb
 ```
 
 ### 字体跟随系统默认（本版重点）
@@ -157,6 +157,21 @@ sudo bash linux/install.sh rollback
 
 ---
 
+## 6.6 启动器只显示「桌面挂件控制中心」
+
+从 v2.9.76 起，安装包内全部挂件/任务栏工具的菜单项都带 `NoDisplay=true`，
+启动器里只显示**桌面挂件控制中心**一个图标——挂件统一由它启动/停止/设置。
+开机自启读的是 `~/.config/autostart/` 里的另一份文件，不受影响。
+
+已在用旧版的机器想立即生效（不用重装）：
+
+```bash
+sudo bash hide-launcher-icons.sh
+```
+
+想恢复某个挂件的图标：删掉 `/usr/local/share/applications/<对应>.desktop`
+里的 `NoDisplay=true` 行，再执行 `update-desktop-database -q /usr/local/share/applications`。
+
 ## 6.5 清理旧版单独安装的挂件/任务栏工具
 
 装本套件之前，若曾把「划选复制 / 鼠标拖尾 / 截图OCR」单独装进系统
@@ -183,7 +198,7 @@ sudo bash clean-old-widgets.sh
 **安装步骤**
 ```bash
 # 1) 拷贝安装包到目标机后，一条命令安装
-sudo dpkg -i desktop-widgets-suite_2.9.75_all.deb
+sudo dpkg -i desktop-widgets-suite_2.9.76_all.deb
 
 # 2) 若提示缺运行库（python3-gi / gir1.2-gtk-3.0 等），让 apt 自动补全
 sudo apt-get install -f
