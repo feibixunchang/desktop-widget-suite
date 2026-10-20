@@ -166,6 +166,7 @@ def main():
     miss = {}
     last_start = {}
     first_miss = {}
+    fail_count = {}   # 连续启动失败次数（启动后立刻消失即计一次失败）
     while _running:
         now = time.time()
         for name, cmd, pattern in WIDGETS:
@@ -178,6 +179,7 @@ def main():
             if is_running(pattern):
                 miss[name] = 0
                 first_miss[name] = None
+                fail_count[name] = 0      # 稳定运行 → 清零失败计数
                 continue
             miss[name] = miss.get(name, 0) + 1
             if miss[name] < MISS_LIMIT:
@@ -189,11 +191,18 @@ def main():
                     first_miss[name] = now
                 elif now - first_miss[name] < delay:
                     continue
-            if now - last_start.get(name, 0) < RESTART_GAP:
+            # 连续失败退避：坏挂件（如缺模块必然秒退）不再每 12 秒无限重启，
+            # 间隔按 12s → 2min → 5min → 10min 递增，避免刷日志、空耗 CPU
+            fc = fail_count.get(name, 0)
+            gap = RESTART_GAP if fc < 3 else min(600, 120 * (fc - 2))
+            if now - last_start.get(name, 0) < gap:
                 continue
             last_start[name] = now
             if launch(cmd, conf.get('args', '')):
-                log('restart %s' % name)
+                fail_count[name] = fc + 1
+                log('restart %s%s' % (
+                    name,
+                    ('（连续失败 %d 次，退避 %ds）' % (fc + 1, gap)) if fc >= 2 else ''))
             miss[name] = 0
             first_miss[name] = None
         # 分段睡眠，收到结束信号能及时退出

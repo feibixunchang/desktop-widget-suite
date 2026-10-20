@@ -404,6 +404,9 @@ INJECT_WIDGET_FIXES = [
     ('widgets-src/radio.py', 'usr/local/lib/desktop-radio/radio.py', 0o644),
     ('widgets-src/shot-ocr.py', 'usr/lib/shot-ocr/main.py', 0o644),
     ('common/widget_font.py', 'usr/lib/shot-ocr/widget_font.py', 0o644),
+    # frame 不在 FONT_PATCH_TARGETS 里，widget_font.py 必须显式注入，
+    # 否则 frame.py 的 `from widget_font import ...` 会 ModuleNotFoundError
+    ('common/widget_font.py', 'usr/local/lib/desktop-frame/widget_font.py', 0o644),
 ]
 
 
@@ -500,6 +503,25 @@ def build_patched(ref_deb, out_deb, src_root):
             extra.append(('usr/local/lib/mpv/' + f, fh.read(), 0o644))
         mpv_count += 1
     print("  mpv 运行时: %d 个文件（mpv.bin/tesseract.bin + 依赖库 + chi_sim/eng）" % mpv_count)
+    # 防复发：注入的挂件源码若 import widget_font，同目录必须也注入该模块。
+    # （v2.9.78 漏了 desktop-frame，导致相框 ModuleNotFoundError 起不来）
+    injected = {item[0] for item in extra}   # extra 元素为 (arcname, data, mode)
+    missing_font = []
+    py_injected = 0
+    for src_rel, arcname, _mode in inject_list:
+        if not arcname.endswith('.py'):
+            continue
+        py_injected += 1
+        with open(os.path.join(src_root, src_rel), encoding='utf-8',
+                  errors='replace') as fh:
+            txt = fh.read()
+        if 'widget_font import' in txt:
+            if (os.path.dirname(arcname) + '/widget_font.py') not in injected:
+                missing_font.append(arcname)
+    if missing_font:
+        raise SystemExit('构建中止：以下注入源码 import widget_font，但同目录未注入该模块：\n  '
+                         + '\n  '.join(missing_font))
+    print("  字体模块依赖检查: 通过（%d 个注入 py）" % py_injected)
     print("注入新文件:", len(extra))
 
     md5lines = []
