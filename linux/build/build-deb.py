@@ -387,6 +387,29 @@ INJECT_SUPERVISOR = ('supervisor/supervisor.py', 'usr/local/lib/desktop-widgets-
 INJECT_DOC = ('doc/安装使用说明.txt', 'usr/share/doc/desktop-widgets-suite/安装使用说明.txt', 0o644)
 
 
+def patch_desktop_entry(nm, data):
+    """给挂件/任务栏工具的菜单项加 NoDisplay=true，从启动器里隐藏。
+
+    只保留「桌面挂件控制中心」可见——挂件统一由控制中心管理，启动器里
+    不再罗列十几个图标。NoDisplay 只影响菜单显示，不影响 ~/.config/autostart
+    里的自启动（那读的是另一份文件），也不影响控制中心里手动启动。
+    """
+    if not nm.endswith('.desktop'):
+        return data
+    base = nm.rsplit('/', 1)[-1]
+    if base == 'desktop-widgets-hub.desktop':
+        return data
+    try:
+        text = data.decode('utf-8')
+    except Exception:
+        return data
+    lines = [l for l in text.splitlines() if not l.startswith('NoDisplay=')]
+    lines.append('NoDisplay=true')
+    if not text.endswith('\n'):
+        lines.append('')
+    return ('\n'.join(lines)).encode('utf-8')
+
+
 def patch_widget_source(name, data):
     try:
         text = data.decode('utf-8')
@@ -446,8 +469,8 @@ def build_patched(ref_deb, out_deb, src_root):
 
     def patch_fn(nm, data):
         if nm in FONT_PATCH_TARGETS:
-            return patch_widget_source(nm, data)
-        return data
+            data = patch_widget_source(nm, data)
+        return patch_desktop_entry(nm, data)
 
     new_data = rewrite_tar(data_blob, should_skip, collector,
                            extra_files=extra, patch_fn=patch_fn)
