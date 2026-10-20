@@ -39,6 +39,14 @@ install_pkg() {
   # 清掉可能残留的 root 启动的守护，避免重复实例
   pkill -f desktop-widgets-supervisor 2>/dev/null || true
   sleep 1
+  # 旧版安装包（2.9.74 及更早）的 data.tar 含 './' 根条目，dpkg 会把它记进
+  # /var/lib/dpkg/info/<pkg>.list 成为一行 '/'；升级时 dpkg 读旧清单遇到这行
+  # 会报「文件列表含有空的文件名」致命错。先清掉该行再安装。
+  deepin-immutable-ctl admin exec -- bash -c '
+    f=/var/lib/dpkg/info/desktop-widgets-suite.list
+    if [ -f "$f" ] && grep -qx "/" "$f"; then
+      sed -i "/^\/$/d" "$f" && echo "    已清理旧清单中的空文件名条目('/')"
+    fi'
   echo "==> 安装新包 (deepin-immutable-ctl admin exec, dpkg -i 强制重装)"
   deepin-immutable-ctl admin exec -- dpkg -i --force-confask,confnew,overwrite "$DEB" 2>&1 || {
      echo "!! dpkg -i 失败，尝试修复依赖后重试"
