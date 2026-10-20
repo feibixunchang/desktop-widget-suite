@@ -11,6 +11,22 @@
   - **版本号 + 一键更新**：标题栏与底栏显示版本，自动/手动检查最新版，点「立即更新」即
     自动下载 .deb 并经 pkexec 提权安装（Deepin 不可变系统自动走 `deepin-immutable-ctl`）；
   - **平滑滚动**：滚轮带缓动、列表可按住拖动，状态刷新改为单次进程快照，不再卡顿。
+- **桌面影视挂件修复（2.9.77）**：修复全屏返回后控制窗被置底、点击/右键全部失灵
+  （电影关不掉）的根因；播放中新增常开「✕ 关闭」钮、Esc 停播、停止挂件时
+  mpv 随之干净退出；右键菜单改用 `popup_at_pointer`，并修复开机自启菜单项失效。
+- **mpv / tesseract 全自包含（2.9.78）**：mpv 0.37 二进制 + 93 个依赖库 +
+  tesseract 5.5 + chi_sim/eng 语言数据全部装进包内 `/usr/local/lib/mpv/`，
+  经 wrapper（`/usr/local/bin/mpv`、`/usr/local/bin/tesseract`）加载，
+  **换到任何 Linux 机器安装即可播放影片/收音机/截图OCR，无需另行安装 mpv/tesseract，
+  也不需要联网补依赖**（安装包约 61MB，装好后约占 200MB 磁盘）。
+  已在隔离环境（env -i 模拟干净系统）实测：播放、OCR 均正常。
+- **全挂件暗病修复（2.9.78）**：
+  - 修复 **9 个挂件的开机自启失效**（`f'...{{name}}...'` 被写成字面量，
+    生成的自启动文件名/名称都是 `{name}`）——天气/便签/日历/相框/RSS/音乐/计时器/影视；
+  - 修复 **音乐/电台/相框/截图OCR/日历便签**里硬编码的 `Sans` 字体
+    （共 21 处，全部改为跟随系统默认字体，如方正宋黑）；
+  - 修复**参考包自带的 `libjpeg.so.62` 冒充文件**（turbo8 改名而来，缺
+    `LIBJPEG_6.2` 符号版本，会让加载它的库直接报错起不来）。
 
 - 17 个挂件：日历 / 相框 / 监听 / 视频 / 音乐 / 记事 / 电台 / RSS / 计时 / 钱包 / 天气 /
   Edge 滚动控制 / 显示器输入切换 / 任务栏信息 / 截图 OCR / 鼠标拖尾 / 复制工具栏
@@ -29,10 +45,10 @@ Deepin 25 是 **不可变系统**（ostree），系统目录只读，必须用 `
 在可写层安装。在**本机终端**执行：
 
 ```bash
-# 安装包位于本仓库 linux/dist/desktop-widgets-suite_2.9.76_all.deb
+# 安装包位于本仓库 linux/dist/desktop-widgets-suite_2.9.78_all.deb
 # 用 dpkg -i 强制重装（版本号不变时 apt 会跳过，dpkg 会覆盖文件）
 sudo deepin-immutable-ctl admin exec -- dpkg -i \
-    /path/to/linux/dist/desktop-widgets-suite_2.9.76_all.deb
+    /path/to/linux/dist/desktop-widgets-suite_2.9.78_all.deb
 ```
 
 安装后守护进程会随登录自启；若想立刻生效（不重登录）：
@@ -51,7 +67,7 @@ nohup python3 /usr/local/lib/desktop-widgets-supervisor/supervisor.py >/dev/null
 linux/
 ├── README.md                 本文件
 ├── dist/
-│   └── desktop-widgets-suite_2.9.76_all.deb   # Linux 安装包（v1.0 Release 资源）
+│   └── desktop-widgets-suite_2.9.78_all.deb   # Linux 安装包（v1.0 Release 资源）
 ├── build/
 │   └── build-deb.py          # 纯标准库 .deb 构建器（无需 dpkg-deb/ar/tar 命令）
 ├── debian/                   # 打包元数据：control / postinst / prerm / postrm
@@ -78,20 +94,20 @@ linux/
 ```bash
 # 方式 A：以现有参考包为基准，剔除运行期垃圾（.pyc / .pid / .log）并重算 md5sums
 python3 build/build-deb.py \
-    --reference dist/desktop-widgets-suite_2.9.76_all.deb \
-    --output    dist/desktop-widgets-suite_2.9.76_all.deb
+    --reference dist/desktop-widgets-suite_2.9.78_all.deb \
+    --output    dist/desktop-widgets-suite_2.9.78_all.deb
 
 # 方式 A+：在 A 基础上注入「控制中心 + 字体解析模块 widget_font.py」，
 #          并把各挂件写死的字体改为「运行时读取系统默认字体」
 python3 build/build-deb.py --patch \
-    --reference dist/desktop-widgets-suite_2.9.76_all.deb \
-    --output    dist/desktop-widgets-suite_2.9.76_all.deb
+    --reference dist/desktop-widgets-suite_2.9.78_all.deb \
+    --output    dist/desktop-widgets-suite_2.9.78_all.deb
 
 # 方式 B：直接在已安装的本机上，以「已安装的挂件目录」为源重建
-python3 build/build-deb.py --from-live --output dist/desktop-widgets-suite_2.9.76_all.deb
+python3 build/build-deb.py --from-live --output dist/desktop-widgets-suite_2.9.78_all.deb
 
 # 仅校验产出包的 md5sums 自洽性
-python3 build/build-deb.py --check --output dist/desktop-widgets-suite_2.9.76_all.deb
+python3 build/build-deb.py --check --output dist/desktop-widgets-suite_2.9.78_all.deb
 ```
 
 ### 字体跟随系统默认（本版重点）
@@ -198,7 +214,7 @@ sudo bash clean-old-widgets.sh
 **安装步骤**
 ```bash
 # 1) 拷贝安装包到目标机后，一条命令安装
-sudo dpkg -i desktop-widgets-suite_2.9.76_all.deb
+sudo dpkg -i desktop-widgets-suite_2.9.78_all.deb
 
 # 2) 若提示缺运行库（python3-gi / gir1.2-gtk-3.0 等），让 apt 自动补全
 sudo apt-get install -f
