@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <ApplicationIcon>..\..\WidgetHub\WidgetHub.ico</ApplicationIcon>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>WidgetHubUninstall</AssemblyName>
+    <AssemblyTitle>桌面挂件总管 卸载程序</AssemblyTitle>
+    <RootNamespace>WidgetHubUninstall</RootNamespace>
+  </PropertyGroup>
+</Project>
