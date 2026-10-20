@@ -1,0 +1,8 @@
+#!/bin/sh
+# 桌面挂件套装内置 tesseract 启动器（v2.9.78）
+# 真二进制、依赖库与语言数据（chi_sim/eng）都在 /usr/local/lib/mpv/，
+# 与系统 tesseract 包完全隔离。
+LIB=/usr/local/lib/mpv
+export LD_LIBRARY_PATH="$LIB:$LD_LIBRARY_PATH"
+export TESSDATA_PREFIX="$LIB/tessdata"
+exec "$LIB/tesseract.bin" "$@"

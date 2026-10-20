@@ -384,7 +384,27 @@ FONT_PATCH_TARGETS = {
 INJECT_HUB_LAUNCHER = ('hub/desktop-widgets-hub', 'usr/local/bin/desktop-widgets-hub', 0o755)
 INJECT_HUB_DESKTOP = ('hub/desktop-widgets-hub.desktop', 'usr/local/share/applications/desktop-widgets-hub.desktop', 0o644)
 INJECT_SUPERVISOR = ('supervisor/supervisor.py', 'usr/local/lib/desktop-widgets-supervisor/supervisor.py', 0o755)
+INJECT_MOVIE_WIDGET = ('widgets-src/desktop-movie.py', 'usr/local/lib/desktop-movie/desktop-movie.py', 0o644)
+INJECT_MOVIE_FONT = ('common/widget_font.py', 'usr/local/lib/desktop-movie/widget_font.py', 0o644)
 INJECT_DOC = ('doc/安装使用说明.txt', 'usr/share/doc/desktop-widgets-suite/安装使用说明.txt', 0o644)
+# v2.9.78：mpv / tesseract 自包含运行时（替换 usr/local/bin 里的 mpv ELF，
+# 新增 tesseract wrapper；依赖库平铺进已存在的 /usr/local/lib/mpv/）
+INJECT_MPV_WRAPPER = ('widgets-src/mpv-wrapper', 'usr/local/bin/mpv', 0o755)
+INJECT_TESSERACT_WRAPPER = ('widgets-src/tesseract-wrapper', 'usr/local/bin/tesseract', 0o755)
+# v2.9.78：修过暗病的挂件源码（{{name}} f-string / 硬编码字体 / mpv 绝对路径）
+INJECT_WIDGET_FIXES = [
+    ('widgets-src/weather.py', 'usr/local/lib/desktop-weather/widget.py', 0o644),
+    ('widgets-src/notes.py', 'usr/local/lib/desktop-notes/notes.py', 0o644),
+    ('widgets-src/calendar.py', 'usr/local/lib/desktop-calendar/calendar_widget.py', 0o644),
+    ('widgets-src/note_editor.py', 'usr/local/lib/desktop-calendar/note_editor.py', 0o644),
+    ('widgets-src/rss.py', 'usr/local/lib/desktop-rss/rss.py', 0o644),
+    ('widgets-src/music.py', 'usr/local/lib/desktop-music/music.py', 0o644),
+    ('widgets-src/timer.py', 'usr/local/lib/desktop-timer/timer_alarm_widget.py', 0o644),
+    ('widgets-src/frame.py', 'usr/local/lib/desktop-frame/frame.py', 0o644),
+    ('widgets-src/radio.py', 'usr/local/lib/desktop-radio/radio.py', 0o644),
+    ('widgets-src/shot-ocr.py', 'usr/lib/shot-ocr/main.py', 0o644),
+    ('common/widget_font.py', 'usr/lib/shot-ocr/widget_font.py', 0o644),
+]
 
 
 def patch_desktop_entry(nm, data):
@@ -455,12 +475,31 @@ def build_patched(ref_deb, out_deb, src_root):
     for d in widget_dirs:
         extra.append((d + '/widget_font.py', wf_data, 0o644))
     print("  widget_font.py 复制到 %d 个挂件目录" % len(widget_dirs))
-    # ② 控制中心自包含启动器 + 菜单项 + 自愈守护（均放进已存在目录）
-    for src_rel, arcname, mode in (INJECT_HUB_LAUNCHER, INJECT_HUB_DESKTOP,
-                                  INJECT_SUPERVISOR, INJECT_DOC):
+    # ② 控制中心自包含启动器 + 菜单项 + 自愈守护 + 修过暗病的挂件源码
+    #    （均放进已存在目录，替换参考包同名文件）
+    inject_list = [INJECT_HUB_LAUNCHER, INJECT_HUB_DESKTOP,
+                   INJECT_SUPERVISOR, INJECT_DOC,
+                   INJECT_MOVIE_WIDGET, INJECT_MOVIE_FONT,
+                   INJECT_MPV_WRAPPER, INJECT_TESSERACT_WRAPPER] + INJECT_WIDGET_FIXES
+    for src_rel, arcname, mode in inject_list:
         p = os.path.join(src_root, src_rel)
         with open(p, 'rb') as fh:
             extra.append((arcname, fh.read(), mode))
+    # ③ mpv / tesseract 自包含运行时：二进制 + 92 个依赖 .so + 语言数据，
+    #    全部平铺进已存在的 /usr/local/lib/mpv/（不建任何新目录）
+    mpv_dir = os.path.join(src_root, 'widgets-src', 'mpv-libs')
+    mpv_count = 0
+    for f in sorted(os.listdir(mpv_dir)):
+        p = os.path.join(mpv_dir, f)
+        if os.path.isfile(p):
+            with open(p, 'rb') as fh:
+                extra.append(('usr/local/lib/mpv/' + f, fh.read(), 0o755))
+            mpv_count += 1
+    for f in sorted(os.listdir(os.path.join(mpv_dir, 'tessdata'))):
+        with open(os.path.join(mpv_dir, 'tessdata', f), 'rb') as fh:
+            extra.append(('usr/local/lib/mpv/' + f, fh.read(), 0o644))
+        mpv_count += 1
+    print("  mpv 运行时: %d 个文件（mpv.bin/tesseract.bin + 依赖库 + chi_sim/eng）" % mpv_count)
     print("注入新文件:", len(extra))
 
     md5lines = []
