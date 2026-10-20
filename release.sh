@@ -37,8 +37,18 @@ echo "==> 3/6 构建卸载器"
 "$DOTNET" publish installer/WidgetHubUninstall/WidgetHubUninstall.csproj -c Release -o installer/WidgetHubUninstall/out -v quiet --nologo
 
 echo "==> 4/6 打包负载并构建安装程序"
-PROGRAMS_DIR="$LOCALAPPDATA/Programs"
+# 优先用管理器自己维护的 Skins 汇总目录，而不是 Programs 下那 10 个各自
+# 独立的安装目录。
+#
+# Programs 下每个挂件是自己装的，里面混着运行期产物（截图、日志、.bak，
+# 桌面音乐那台还多出一份播放时生成的 shot_*.png），而且这些文件夹归各自的
+# 安装器管，时不时会因为被占用或权限问题读不出来一个 txt 就把整次发布搞停。
+# Skins 汇总是 WidgetHub 正在用的那一份，是干净的、和实际运行完全一致的。
+PROGRAMS_DIR="$LOCALAPPDATA/Programs/WidgetHubSuite/Skins"
+[ -d "$PROGRAMS_DIR" ] || PROGRAMS_DIR="$LOCALAPPDATA/Programs"
+[ -d "$PROGRAMS_DIR" ] || PROGRAMS_DIR="$HOME/AppData/Local/Programs/WidgetHubSuite/Skins"
 [ -d "$PROGRAMS_DIR" ] || PROGRAMS_DIR="$HOME/AppData/Local/Programs"
+echo "    挂件来源: $PROGRAMS_DIR"
 "$DOTNET" run --project tools/Diagnostics -c Release --no-build -- --pack \
   "$HERE/WidgetHub/publish48" "$PROGRAMS_DIR" "$HERE/stage" "$HERE/installer/WidgetHubSetup/payload.zip"
 "$DOTNET" publish installer/WidgetHubSetup/WidgetHubSetup.csproj -c Release -o installer/WidgetHubSetup/out -v quiet --nologo
@@ -53,6 +63,18 @@ git push origin "$TAG" --force
 
 echo "==> 6/6 创建 GitHub Release"
 ASSET_NAME="WidgetHubSetup.exe"
+# 有 RELEASE_NOTES.md 就用它当正文（每次发版前写这一版的改动），
+# 没有就退回默认的三行说明。默认说明对"这一版改了什么"一无所知。
+if [ -f RELEASE_NOTES.md ]; then
+  BODY="$(cat RELEASE_NOTES.md)
+
+---
+* 10 个桌面挂件 + 统一托盘图标
+* 目标电脑无需安装任何 .NET 运行时
+* 安装包：$ASSET_NAME（约 $(du -m "WidgetHubSetup-$TAG.exe" | cut -f1)MB）
+
+下载 $ASSET_NAME 后双击即可安装；已安装的用户可在管理器里点右上角版本号 →「检查更新」一键升级。"
+else
 BODY=$(cat << EOF
 桌面挂件合集 WidgetHub $TAG
 
@@ -63,6 +85,7 @@ BODY=$(cat << EOF
 下载 $ASSET_NAME 后双击即可安装；已安装的用户可在管理器里点右上角版本号 ->「检查更新」一键升级。
 EOF
 )
+fi
 curl -s -X POST "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases" \
   -H "Authorization: token $GITHUB_TOKEN" \
   -H "Accept: application/vnd.github+json" \

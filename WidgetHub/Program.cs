@@ -53,7 +53,7 @@ namespace WidgetHub
     /// <summary>版本与更新源信息。</summary>
     public static class AppInfo
     {
-        public const string Version = "1.0";
+        public const string Version = "1.1";
         public const string DisplayName = "桌面挂件合集";
         public const string RepoOwner = "feibixunchang";
         // GitHub 不允许仓库名带中文（会被剥成空），所以仓库用 ASCII 名，中文名放在描述/README
