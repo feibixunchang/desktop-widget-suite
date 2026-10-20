@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <ApplicationIcon>WidgetHub.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>WidgetHubSetup</AssemblyName>
+    <AssemblyTitle>桌面挂件总管 安装程序</AssemblyTitle>
+    <Product>桌面挂件总管</Product>
+    <RootNamespace>WidgetHubSetup</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 由 build_package.cmd 生成：把 WidgetHub + 10 个挂件打包成 payload.zip -->
+    <EmbeddedResource Include="payload.zip" LogicalName="payload.zip" Condition="Exists('payload.zip')" />
+  </ItemGroup>
+</Project>

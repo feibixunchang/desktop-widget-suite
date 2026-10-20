@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+    <AssemblyName>XiaoPuHeWeather</AssemblyName>
+    <RootNamespace>XiaoPuHeWeather</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>1.0.6</Version>
+    <AssemblyVersion>1.0.6.0</AssemblyVersion>
+    <FileVersion>1.0.6.0</FileVersion>
+    <Product>小普河天气挂件</Product>
+    <AssemblyTitle>小普河天气挂件</AssemblyTitle>
+    <Description>使用 Open-Meteo 免费公共 API 的 Windows 桌面天气挂件</Description>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <ApplicationIcon>Assets\weather.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- net48 里 System.Net.Http 是独立程序集，要显式引用 -->
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Net.Http.WebRequest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\weather.ico" />
+  </ItemGroup>
+</Project>

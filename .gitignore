@@ -1,0 +1,8 @@
+bin/
+obj/
+out/
+publish48/
+publish/
+stage/
+*.pdb
+WidgetHubSetup-*.exe
