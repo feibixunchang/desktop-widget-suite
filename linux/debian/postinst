@@ -93,7 +93,7 @@ DESK
             # 避免 repeat 安装时把同一个挂件重复启动
             # 只匹配真正的程序进程（python3/node 开头），避免匹配到
             # 恰好命令行里含同名字符串的其它命令
-            pat="/$(basename "$(echo "$exec" | awk '{print $NF}')")"
+            pat="/$(basename "$(echo "$exec" | awk '{print $1}')")"
             pat=${pat%.py}
             if pgrep -u "$uid" -f "^(python3|python|node|/usr/bin/python3).*$pat" >/dev/null 2>&1; then
                 continue

@@ -36,11 +36,28 @@ stop_widgets() {
 install_pkg() {
   if [ ! -f "$DEB" ]; then echo "找不到安装包: $DEB"; exit 1; fi
   stop_widgets
+  # 清掉可能残留的 root 启动的守护，避免重复实例
+  pkill -f desktop-widgets-supervisor 2>/dev/null || true
+  sleep 1
   echo "==> 安装新包 (deepin-immutable-ctl admin exec, dpkg -i 强制重装)"
-  deepin-immutable-ctl admin exec -- dpkg -i "$DEB" 2>&1 || deepin-immutable-ctl admin exec -- apt-get install -y -f
-  echo "==> 重启守护以加载新包"
-  nohup python3 "$SUP" >/dev/null 2>&1 &
-  sleep 6
+  deepin-immutable-ctl admin exec -- dpkg -i --force-confask,confnew,overwrite "$DEB" 2>&1 || {
+     echo "!! dpkg -i 失败，尝试修复依赖后重试"
+     deepin-immutable-ctl admin exec -- apt-get install -f -y
+     deepin-immutable-ctl admin exec -- dpkg -i --force-overwrite "$DEB" 2>&1
+  }
+  # postinst 会为本机用户拉起守护与挂件；脚本不再手动启动，避免重复 / 以 root 运行
+  sleep 8
+  # 兜底：若守护未自动拉起，则以登录用户身份启动
+  if ! pgrep -f desktop-widgets-supervisor >/dev/null 2>&1; then
+    echo "==> 守护未自动拉起，尝试以用户身份启动"
+    for u in /home/*; do
+      user=$(basename "$u"); uid=$(id -u "$user" 2>/dev/null)
+      case "$uid" in ''|*[!0-9]*) continue ;; esac
+      [ "$uid" -ge 1000 ] || continue
+      command -v runuser >/dev/null && runuser -u "$user" -- setsid nohup python3 "$SUP" >/dev/null 2>&1 < /dev/null &
+    done
+    sleep 4
+  fi
   status
 }
 
