@@ -316,10 +316,6 @@ _FONT_RE = re.compile(
 )
 
 _IMPORT_BLOCK = (
-    "import sys as _wfsys\n"
-    "_wf_path = '/usr/local/lib/desktop-widgets-suite'\n"
-    "if _wf_path not in _wfsys.path:\n"
-    "    _wfsys.path.insert(0, _wf_path)\n"
     "from widget_font import SYS_FONT as _SYS_FONT\n"
 )
 
@@ -339,14 +335,13 @@ FONT_PATCH_TARGETS = {
     'usr/local/lib/monitor-input-switch/main.py',
 }
 
-# 注入的新文件：(仓库内相对路径, data tar 内目标路径, 权限)
-INJECT_FILES = [
-    ('common/widget_font.py', 'usr/local/lib/desktop-widgets-suite/widget_font.py', 0o644),
-    ('fonts/99-desktop-widgets.conf', 'etc/fonts/conf.d/99-desktop-widgets.conf', 0o644),
-    ('hub/hub.py', 'usr/local/lib/desktop-widgets-hub/hub.py', 0o644),
-    ('hub/desktop-widgets-hub', 'usr/local/bin/desktop-widgets-hub', 0o755),
-    ('hub/desktop-widgets-hub.desktop', 'usr/share/applications/desktop-widgets-hub.desktop', 0o644),
-]
+# 注入的新文件（只放进【已存在】的目录，绝不新建顶层目录——
+# Deepin 25 不可变系统下 dpkg 无法在解包阶段创建全新子目录，否则整个包安装中止）。
+#   - widget_font.py 复制到每个挂件【自己的】目录（同目录 import widget_font 必然可用）
+#   - 控制中心为自包含单文件脚本，放进已存在的 /usr/local/bin
+#   - 菜单项放进已存在的 /usr/local/share/applications
+INJECT_HUB_LAUNCHER = ('hub/desktop-widgets-hub', 'usr/local/bin/desktop-widgets-hub', 0o755)
+INJECT_HUB_DESKTOP = ('hub/desktop-widgets-hub.desktop', 'usr/local/share/applications/desktop-widgets-hub.desktop', 0o644)
 
 
 def patch_widget_source(name, data):
@@ -386,7 +381,16 @@ def build_patched(ref_deb, out_deb, src_root):
     debian_bin = m[bin_name]
 
     extra = []
-    for src_rel, arcname, mode in INJECT_FILES:
+    # ① widget_font.py 复制到每个需要字体补丁的挂件目录（已存在的目录）
+    wf_src = os.path.join(src_root, 'common/widget_font.py')
+    with open(wf_src, 'rb') as fh:
+        wf_data = fh.read()
+    widget_dirs = sorted({os.path.dirname(t) for t in FONT_PATCH_TARGETS})
+    for d in widget_dirs:
+        extra.append((d + '/widget_font.py', wf_data, 0o644))
+    print("  widget_font.py 复制到 %d 个挂件目录" % len(widget_dirs))
+    # ② 控制中心自包含启动器 + 菜单项（已存在目录）
+    for src_rel, arcname, mode in (INJECT_HUB_LAUNCHER, INJECT_HUB_DESKTOP):
         p = os.path.join(src_root, src_rel)
         with open(p, 'rb') as fh:
             extra.append((arcname, fh.read(), mode))
