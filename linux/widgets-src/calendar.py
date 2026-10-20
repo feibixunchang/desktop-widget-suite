@@ -582,7 +582,8 @@ class CalendarWidget(Gtk.Window):
         for pc in NOTE_PRESETS:
             tb = Gtk.ToggleButton()
             lbl = Gtk.Label()
-            lbl.set_markup('<span foreground="%s" font="%s 15" % _SYS_FONT>●</span>' % pc)
+            lbl.set_markup('<span foreground="%s" font="%s">●</span>'
+                           % (pc, _SYS_FONT + ' 15'))
             tb.add(lbl)
             tb.set_active(pc == note_color(self.notes, d))
             tb.connect('toggled', self._on_pick_color, pc)

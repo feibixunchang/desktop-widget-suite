@@ -14,6 +14,13 @@
 - **桌面影视挂件修复（2.9.77）**：修复全屏返回后控制窗被置底、点击/右键全部失灵
   （电影关不掉）的根因；播放中新增常开「✕ 关闭」钮、Esc 停播、停止挂件时
   mpv 随之干净退出；右键菜单改用 `popup_at_pointer`，并修复开机自启菜单项失效。
+- **中文输入修复（2.9.80）**：装的是 fcitx5 但环境变量 `GTK_IM_MODULE` 仍指向旧名
+  `fcitx` 时，GTK 找不到 `im-fcitx.so`，输入框只能敲英文。11 个挂件启动器现已
+  自动检测系统实际安装的 GTK 输入法模块并纠正（fcitx5 > fcitx > ibus > xim）。
+- **万年历记事弹窗修复（2.9.80）**：上一版改字体时把 `% _SYS_FONT` 误写进
+  字符串字面量内部，导致 `TypeError`，右键日期的记事弹窗一打开就崩。已修复，
+  并新增回归检查脚本 `build/check_markup.py`（比对所有 set_markup 的占位符
+  与参数个数）。
 - **mpv / tesseract 全自包含（2.9.78）**：mpv 0.37 二进制 + 93 个依赖库 +
   tesseract 5.5 + chi_sim/eng 语言数据全部装进包内 `/usr/local/lib/mpv/`，
   经 wrapper（`/usr/local/bin/mpv`、`/usr/local/bin/tesseract`）加载，
@@ -45,10 +52,10 @@ Deepin 25 是 **不可变系统**（ostree），系统目录只读，必须用 `
 在可写层安装。在**本机终端**执行：
 
 ```bash
-# 安装包位于本仓库 linux/dist/desktop-widgets-suite_2.9.79_all.deb
+# 安装包位于本仓库 linux/dist/desktop-widgets-suite_2.9.80_all.deb
 # 用 dpkg -i 强制重装（版本号不变时 apt 会跳过，dpkg 会覆盖文件）
 sudo deepin-immutable-ctl admin exec -- dpkg -i \
-    /path/to/linux/dist/desktop-widgets-suite_2.9.79_all.deb
+    /path/to/linux/dist/desktop-widgets-suite_2.9.80_all.deb
 ```
 
 安装后守护进程会随登录自启；若想立刻生效（不重登录）：
@@ -67,7 +74,7 @@ nohup python3 /usr/local/lib/desktop-widgets-supervisor/supervisor.py >/dev/null
 linux/
 ├── README.md                 本文件
 ├── dist/
-│   └── desktop-widgets-suite_2.9.79_all.deb   # Linux 安装包（v1.0 Release 资源）
+│   └── desktop-widgets-suite_2.9.80_all.deb   # Linux 安装包（v1.0 Release 资源）
 ├── build/
 │   └── build-deb.py          # 纯标准库 .deb 构建器（无需 dpkg-deb/ar/tar 命令）
 ├── debian/                   # 打包元数据：control / postinst / prerm / postrm
@@ -94,20 +101,20 @@ linux/
 ```bash
 # 方式 A：以现有参考包为基准，剔除运行期垃圾（.pyc / .pid / .log）并重算 md5sums
 python3 build/build-deb.py \
-    --reference dist/desktop-widgets-suite_2.9.79_all.deb \
-    --output    dist/desktop-widgets-suite_2.9.79_all.deb
+    --reference dist/desktop-widgets-suite_2.9.80_all.deb \
+    --output    dist/desktop-widgets-suite_2.9.80_all.deb
 
 # 方式 A+：在 A 基础上注入「控制中心 + 字体解析模块 widget_font.py」，
 #          并把各挂件写死的字体改为「运行时读取系统默认字体」
 python3 build/build-deb.py --patch \
-    --reference dist/desktop-widgets-suite_2.9.79_all.deb \
-    --output    dist/desktop-widgets-suite_2.9.79_all.deb
+    --reference dist/desktop-widgets-suite_2.9.80_all.deb \
+    --output    dist/desktop-widgets-suite_2.9.80_all.deb
 
 # 方式 B：直接在已安装的本机上，以「已安装的挂件目录」为源重建
-python3 build/build-deb.py --from-live --output dist/desktop-widgets-suite_2.9.79_all.deb
+python3 build/build-deb.py --from-live --output dist/desktop-widgets-suite_2.9.80_all.deb
 
 # 仅校验产出包的 md5sums 自洽性
-python3 build/build-deb.py --check --output dist/desktop-widgets-suite_2.9.79_all.deb
+python3 build/build-deb.py --check --output dist/desktop-widgets-suite_2.9.80_all.deb
 ```
 
 ### 字体跟随系统默认（本版重点）
@@ -214,7 +221,7 @@ sudo bash clean-old-widgets.sh
 **安装步骤**
 ```bash
 # 1) 拷贝安装包到目标机后，一条命令安装
-sudo dpkg -i desktop-widgets-suite_2.9.79_all.deb
+sudo dpkg -i desktop-widgets-suite_2.9.80_all.deb
 
 # 2) 若提示缺运行库（python3-gi / gir1.2-gtk-3.0 等），让 apt 自动补全
 sudo apt-get install -f

@@ -433,6 +433,57 @@ def patch_desktop_entry(nm, data):
     return ('\n'.join(lines)).encode('utf-8')
 
 
+# 输入法修正片段（插进挂件启动器 bash 脚本，必须在 python3 启动挂件之前生效）
+IM_FIX_SNIPPET = '''# ── 输入法修正（挂件套件注入）────────────────────────────
+# 症状：装的是 fcitx5 但 GTK_IM_MODULE 仍指向旧名 "fcitx"，GTK 找不到
+# im-fcitx.so，输入框只能敲英文、切不出中文。这里按系统实际装了哪个
+# GTK 输入法模块来纠正（fcitx5 > fcitx > ibus > xim）。
+_wgt_imd=""
+for _d in /usr/lib/x86_64-linux-gnu/gtk-3.0/3.0.0/immodules \\
+         /usr/lib/gtk-3.0/3.0.0/immodules; do
+    [ -d "$_d" ] && { _wgt_imd="$_d"; break; }
+done
+if [ -n "$_wgt_imd" ]; then
+    if [ -n "${GTK_IM_MODULE:-}" ] && [ -f "$_wgt_imd/im-$GTK_IM_MODULE.so" ]; then
+        :
+    else
+        for _m in fcitx5 fcitx ibus xim; do
+            if [ -f "$_wgt_imd/im-$_m.so" ]; then
+                export GTK_IM_MODULE="$_m"
+                export XMODIFIERS="@im=$_m"
+                break
+            fi
+        done
+    fi
+fi
+# ── 输入法修正结束 ──────────────────────────────────────
+'''
+
+
+def patch_launcher(nm, data):
+    """给挂件启动器（/usr/local/bin/desktop-* 的 bash 脚本）补输入法修正。
+
+    只处理 shell 启动器；控制中心 desktop-widgets-hub 是 python 脚本、
+    会被 shebang 判断自动跳过。
+    """
+    if not nm.startswith('usr/local/bin/desktop-'):
+        return data
+    try:
+        text = data.decode('utf-8')
+    except Exception:
+        return data
+    if not text.startswith('#!'):
+        return data
+    first = text.split('\n', 1)[0]
+    if ('bash' not in first) and (not first.endswith('/sh')):
+        return data
+    if '_wgt_imd' in text:
+        return data  # 已注入，幂等
+    lines = text.split('\n')
+    lines.insert(1, IM_FIX_SNIPPET)
+    return '\n'.join(lines).encode('utf-8')
+
+
 def patch_widget_source(name, data):
     try:
         text = data.decode('utf-8')
@@ -531,7 +582,8 @@ def build_patched(ref_deb, out_deb, src_root):
     def patch_fn(nm, data):
         if nm in FONT_PATCH_TARGETS:
             data = patch_widget_source(nm, data)
-        return patch_desktop_entry(nm, data)
+        data = patch_desktop_entry(nm, data)
+        return patch_launcher(nm, data)
 
     new_data = rewrite_tar(data_blob, should_skip, collector,
                            extra_files=extra, patch_fn=patch_fn)
