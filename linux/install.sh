@@ -12,7 +12,7 @@
 #==================================================================
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-DEB="$HERE/dist/desktop-widgets-suite_2.9.74_all.deb"
+DEB="$HERE/dist/desktop-widgets-suite_2.9.75_all.deb"
 ROLLBACK="/home/user/.desktop-widgets-rollback/20261020-184139"
 SUP="/usr/local/lib/desktop-widgets-supervisor/supervisor.py"
 SUP_PIDF="/home/user/.local/share/desktop-widgets-supervisor/supervisor.pid"

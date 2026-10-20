@@ -11,6 +11,7 @@
 守护本身只做“补位”，不参与首次启动（首次由 autostart 负责），
 避免重复拉起。
 """
+import json
 import os
 import shlex
 import signal
@@ -20,6 +21,7 @@ import time
 
 HOME = os.path.expanduser('~')
 MARK_DIR = os.path.join(HOME, '.config', 'desktop-widgets')
+SETTINGS_PATH = os.path.join(MARK_DIR, 'settings.json')
 LOG_DIR = os.path.join(HOME, '.local', 'share', 'desktop-widgets-supervisor')
 LOG_PATH = os.path.join(LOG_DIR, 'supervisor.log')
 PID_PATH = os.path.join(LOG_DIR, 'supervisor.pid')
@@ -79,6 +81,46 @@ def log(msg):
         pass
 
 
+_SETTINGS_CACHE = {'mtime': None, 'data': {}}
+
+
+def load_settings():
+    """读取控制中心写入的每个挂件的设置（args / delay / auto_restart）。"""
+    try:
+        mtime = os.path.getmtime(SETTINGS_PATH)
+    except OSError:
+        _SETTINGS_CACHE.update(mtime=None, data={})
+        return {}
+    if _SETTINGS_CACHE['mtime'] == mtime:
+        return _SETTINGS_CACHE['data']
+    try:
+        with open(SETTINGS_PATH) as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    _SETTINGS_CACHE.update(mtime=mtime, data=data)
+    return data
+
+
+def wconf(name):
+    conf = {'args': '', 'delay': 0, 'auto_restart': True}
+    conf.update(load_settings().get(name) or {})
+    return conf
+
+
+def launch(cmd, args=''):
+    cmd = (cmd + ' ' + args).strip() if args else cmd
+    try:
+        subprocess.Popen(shlex.split(cmd), stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception as e:
+        log('launch failed %s: %s' % (cmd, e))
+        return False
+
+
 def is_running(pattern):
     try:
         r = subprocess.run(['pgrep', '-f', pattern],
@@ -89,14 +131,6 @@ def is_running(pattern):
         return True   # 查询失败时不贸然拉起，避免重复
 
 
-def launch(cmd):
-    try:
-        subprocess.Popen(shlex.split(cmd), stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True
-    except Exception as e:
-        log('launch failed %s: %s' % (cmd, e))
-        return False
 
 
 def _on_term(signum, frame):
@@ -131,25 +165,37 @@ def main():
 
     miss = {}
     last_start = {}
+    first_miss = {}
     while _running:
         now = time.time()
         for name, cmd, pattern in WIDGETS:
             off = os.path.join(MARK_DIR, name + '.off')
-            if os.path.exists(off):
+            conf = wconf(name)
+            if os.path.exists(off) or not conf.get('auto_restart', True):
                 miss[name] = 0
+                first_miss[name] = None
                 continue
             if is_running(pattern):
                 miss[name] = 0
+                first_miss[name] = None
                 continue
             miss[name] = miss.get(name, 0) + 1
             if miss[name] < MISS_LIMIT:
                 continue
+            # 挂件自定义的「崩溃重启延迟」
+            delay = int(conf.get('delay') or 0)
+            if delay > 0:
+                if first_miss.get(name) is None:
+                    first_miss[name] = now
+                elif now - first_miss[name] < delay:
+                    continue
             if now - last_start.get(name, 0) < RESTART_GAP:
                 continue
             last_start[name] = now
-            if launch(cmd):
+            if launch(cmd, conf.get('args', '')):
                 log('restart %s' % name)
             miss[name] = 0
+            first_miss[name] = None
         # 分段睡眠，收到结束信号能及时退出
         for _ in range(INTERVAL * 2):
             if not _running:

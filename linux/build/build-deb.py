@@ -122,9 +122,19 @@ def should_skip(nm):
 
 def rewrite_tar(in_blob, skip_pred, collect_md5=None, extra_files=None,
                 patch_fn=None):
+    """重写 data.tar。
+
+    extra_files 里的文件若已存在于输入包中，则【替换】原条目（而不是在包尾
+    再追加一份同名的重复条目——那会让 md5sums 出现两行且与包内旧内容不一致）。
+    """
+    extras = {}
+    for item in (extra_files or []):
+        arcname, payload, mode = item[0], item[1], item[2]
+        extras[arcname] = (payload, mode)
     buf = io.BytesIO()
     with tarfile.open(fileobj=io.BytesIO(in_blob), mode='r:xz') as tin, \
          tarfile.open(fileobj=buf, mode='w:xz', format=tarfile.GNU_FORMAT) as tout:
+        seen = set()
         for m in tin.getmembers():
             nm = norm(m.name)
             if skip_pred(nm):
@@ -138,27 +148,35 @@ def rewrite_tar(in_blob, skip_pred, collect_md5=None, extra_files=None,
             newm.type = m.type
             newm.linkname = m.linkname
             if m.isfile():
-                data = tin.extractfile(m).read()
-                if patch_fn is not None:
-                    data = patch_fn(nm, data)
+                if nm in extras:
+                    # 用注入的新内容替换参考包里的旧文件
+                    payload, mode = extras.pop(nm)
+                    newm.mode = mode
+                    data = payload
+                    seen.add(nm)
+                else:
+                    data = tin.extractfile(m).read()
+                    if patch_fn is not None:
+                        data = patch_fn(nm, data)
                 newm.size = len(data)
                 tout.addfile(newm, io.BytesIO(data))
                 if collect_md5 is not None:
                     collect_md5(nm, data)
             else:
                 tout.addfile(newm)
-        # 追加额外源文件（--patch 模式注入 hub / 字体解析 / 别名）
-        if extra_files:
-            for arcname, payload, mode in extra_files:
-                ti = tarfile.TarInfo(arcname)
-                ti.mode = mode
-                ti.mtime = 0
-                ti.uid = 0
-                ti.gid = 0
-                ti.size = len(payload)
-                tout.addfile(ti, io.BytesIO(payload))
-                if collect_md5 is not None:
-                    collect_md5(arcname, payload)
+        # 输入包里没有的新文件才真正追加
+        for arcname, (payload, mode) in extras.items():
+            if arcname in seen:
+                continue
+            ti = tarfile.TarInfo(arcname)
+            ti.mode = mode
+            ti.mtime = 0
+            ti.uid = 0
+            ti.gid = 0
+            ti.size = len(payload)
+            tout.addfile(ti, io.BytesIO(payload))
+            if collect_md5 is not None:
+                collect_md5(arcname, payload)
     return buf.getvalue()
 
 def build_from_reference(ref_deb, out_deb):
@@ -194,7 +212,19 @@ def build_from_reference(ref_deb, out_deb):
         f.write(out)
     print("写出:", out_deb, len(out), "bytes")
 
+def _control_version():
+    try:
+        with open(os.path.join(DEBIAN, 'control'), encoding='utf-8') as f:
+            for ln in f:
+                if ln.startswith('Version:'):
+                    return ln.split(':', 1)[1].strip()
+    except Exception:
+        pass
+    return None
+
+
 def rebuild_control(ctrl_blob, md5content):
+    target_version = _control_version()
     cbuf = io.BytesIO()
     with tarfile.open(fileobj=io.BytesIO(ctrl_blob), mode='r:xz') as tin, \
          tarfile.open(fileobj=cbuf, mode='w:xz', format=tarfile.GNU_FORMAT) as tout:
@@ -205,6 +235,14 @@ def rebuild_control(ctrl_blob, md5content):
             # 修正 postinst 中 shot-ocr 的 basename 误把 --autostart 当成参数
             if norm(mm.name) == 'postinst' and d is not None:
                 d = d.replace(b"awk '{print $NF}'", b"awk '{print $1}'")
+            # control 整体以 debian/control 为准（版本 / 依赖 / 描述都同步），
+            # 避免沿用参考包里的旧元数据
+            if norm(mm.name) == 'control':
+                try:
+                    with open(os.path.join(DEBIAN, 'control'), 'rb') as cf:
+                        d = cf.read()
+                except Exception:
+                    pass
             nm = tarfile.TarInfo(norm(mm.name))
             nm.mode = mm.mode; nm.mtime = 0; nm.uid = 0; nm.gid = 0
             nm.type = mm.type; nm.linkname = mm.linkname
@@ -342,6 +380,8 @@ FONT_PATCH_TARGETS = {
 #   - 菜单项放进已存在的 /usr/local/share/applications
 INJECT_HUB_LAUNCHER = ('hub/desktop-widgets-hub', 'usr/local/bin/desktop-widgets-hub', 0o755)
 INJECT_HUB_DESKTOP = ('hub/desktop-widgets-hub.desktop', 'usr/local/share/applications/desktop-widgets-hub.desktop', 0o644)
+INJECT_SUPERVISOR = ('supervisor/supervisor.py', 'usr/local/lib/desktop-widgets-supervisor/supervisor.py', 0o755)
+INJECT_DOC = ('doc/安装使用说明.txt', 'usr/share/doc/desktop-widgets-suite/安装使用说明.txt', 0o644)
 
 
 def patch_widget_source(name, data):
@@ -389,8 +429,9 @@ def build_patched(ref_deb, out_deb, src_root):
     for d in widget_dirs:
         extra.append((d + '/widget_font.py', wf_data, 0o644))
     print("  widget_font.py 复制到 %d 个挂件目录" % len(widget_dirs))
-    # ② 控制中心自包含启动器 + 菜单项（已存在目录）
-    for src_rel, arcname, mode in (INJECT_HUB_LAUNCHER, INJECT_HUB_DESKTOP):
+    # ② 控制中心自包含启动器 + 菜单项 + 自愈守护（均放进已存在目录）
+    for src_rel, arcname, mode in (INJECT_HUB_LAUNCHER, INJECT_HUB_DESKTOP,
+                                  INJECT_SUPERVISOR, INJECT_DOC):
         p = os.path.join(src_root, src_rel)
         with open(p, 'rb') as fh:
             extra.append((arcname, fh.read(), mode))

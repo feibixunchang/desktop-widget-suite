@@ -2,29 +2,45 @@
 # -*- coding: utf-8 -*-
 """桌面挂件控制中心 (WidgetHub for Linux) — 自包含单文件启动器
 
-统管全部桌面挂件的图形界面：
-  - 列出所有挂件，显示运行状态（运行中 / 未运行 / 已禁用）
-  - 开关：启用 / 停用（通过 ~/.config/desktop-widgets/<name>.off 标记）
-  - 启动 / 停止 / 重启 单个挂件
-  - 一键 全部启动 / 全部停止 / 重启守护 / 刷新
-  - 标题栏「开机自启」开关：登录桌面时自动打开控制中心
+功能：
+  - 列出全部桌面挂件，实时显示运行状态（运行中 / 未运行 / 已禁用）
+  - 每个挂件：启用开关 / 重启 / 停止 / ⚙ 独立设置（启动参数、延迟、自动重启、字体）
+  - 一键：全部启动 / 全部停止 / 重启守护 / 刷新
+  - 标题栏「开机自启」开关
+  - 系统托盘图标 + 右键菜单（打开 / 全部启动 / 全部停止 / 检查更新 / 退出）
+  - 底部显示版本号，支持检查更新并一键自动更新（私有仓库可配访问令牌）
+  - 平滑滚动：滚轮带缓动、列表可拖拽，配合 /proc 单次快照，界面不卡顿
 
-挂件状态由自愈守护 (supervisor.py) 统一管理；本程序通过标记文件与进程信号与之协作。
+状态由自愈守护 (supervisor.py) 统一管理；本程序通过标记文件与进程信号与之协作。
 """
+import base64
+import json
 import os
-import sys
-import time
+import shlex
 import shutil
 import subprocess
-import shlex
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
 
-import gi
-gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib
+VERSION = '2.9.75'
+APP_ID = 'com.deepin.DesktopWidgetsHub'
+PKG_NAME = 'desktop-widgets-suite'
+DEFAULT_REPO = 'feibixunchang/desktop-widget-suite'
+
+SELF = '/usr/local/bin/desktop-widgets-hub'
+if not os.path.exists(SELF):
+    SELF = os.path.abspath(__file__)
 
 HOME = os.path.expanduser('~')
 MARK_DIR = os.path.join(HOME, '.config', 'desktop-widgets')
 SUP_PY = '/usr/local/lib/desktop-widgets-supervisor/supervisor.py'
+SETTINGS_PATH = os.path.join(MARK_DIR, 'settings.json')
+UPDATE_CFG_PATH = os.path.join(MARK_DIR, 'update.json')
+UPDATE_CACHE_PATH = os.path.join(MARK_DIR, 'update-cache.json')
+ICON_PATH = os.path.join(HOME, '.cache', 'desktop-widgets', 'hub-icon.png')
 
 # (key, 启动命令, pgrep 匹配串, 中文名)
 WIDGETS = [
@@ -63,17 +79,155 @@ WIDGETS = [
     ('copy-toolbar', '/usr/bin/copy-toolbar',
      '/usr/lib/copy-toolbar/main.py', '划选复制工具条'),
 ]
+WIDGET_MAP = {w[0]: w for w in WIDGETS}
+
+# 内置图标（128x128 PNG，base64）
+ICON_B64 = """
+iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAFSElEQVR4nO2dzXITRxSF76j0CCwSklgmCCoWWliSiR8oJKlg
+swvBUgVRMQkmAS+phIQ8kIJtDQsyFewC2/ld+B2UhTWUpNHfaHpOT889n8tFlUvqvq1zuvv2zwhPUuT6D//10ixfC8+/esdL
+q2yjBa99/y8FB7B3511juhkpiMLbwYQREhVA4bNBEiMs9Ma1hxQ+i+xtxTdC7DesPfyH4meYva2LsTSN9eIGxXeC/RgmmOuF
+jR0K7yL7zdlGKMx6AcV3l3m0m+qQxs7fFD8H7Dffm6hzceo7KX/umTgFNB6w9+eFaVqOHRrqFD+XHLSiU0HkD/UHf1H8HHPQ
+en9I82gOQPlVMZQD1L9j7887oxrP3Acg+ebtfFD/9k/2fkUcfP2BJzKQA1B9nRRERGrs/eoINT8fASi/WvpTAB2gFa4ClOPV
+tk/Z/RVTpPq6KXL+1830+wAAuneXjJdZu39qvMyQ7t2lM9Nl1u6fXjBd5rx4q9+cWBkCum3zwo9S2zZnhG7bvPCj1LbxRrCy
+CkCIb7IehPjIegYp9AT7gxI/pNteShovVJRue+kMqUdBeiKoX79dQn2OQ/jt0qLxwntkP94zlCbcCFIOzAD+PTu9f9H6/Xt2
+ej+6/qL0FO0DuNZWQLycApSjaivYtbYi4i0696kkwbW2AuJVdhbgWluZA5CUoQGUwxwgyyBygJ5zn8riuNZWRLycApTDKSDL
+AOLlCKAcGkA5PAzKMoB4eRaQYRDxcgpQDlcBWYaHQaZxra3cCCIpwyQww2CSQND142rrCNCcyVRbR3Hjtfa4lki/foAuinIA
+19qJiReaA1Rbh8jqEtdbbR1aGQWQ9UKfDJKeSLWJNUG1eZg0XqgJqs1DyNAf/lpZBaBMYKoelAnQZhMR8Spbf1idHF/uXDVe
+5rXmK+NlhrzcuWr8iZ1rzVf2vh+gcseuAYhduBGkHBpAObruA5AIHAGUo+osgEThCKAc5gDK4QigHBpAObruBJII1h8ODR6t
+GN9bX7kdpLa3Hjxa6Zguc+V2sG66zHnxPvrydysOSEP4UUwaIQ3hR7FhBPh9AOlhxBfp12Mm3tTF78fbQWsBTwKDxxjxTdUX
+PMaIb6u+AtJuaPFDzutdKF6oGAPxdlCa6FkFuNZOULwFVP8PditWv3s32K2cxYzXSu8PCXYrHYQu3AhSjqLnAkTca2v68erJ
+AUSo/xg4BShH1YUQ19qKiFfXfQDX2sr/MIKkDQ2gHK4CsgxXASRtrF8IQeJaWxHxcgrIMpwCSNrQAMrhYVCmYQ5gFtfaCoiX
+ZwEZBhEvcwDl8DAoy/AwiKQNzABXbr2w+t27ceu/cuuFtce1kPXrWQW41k7ctXDcT3nTtzIKlDf9CwvGa2UUKG/66yhN4DkA
+2gRJ60ObAF2flYdDyxsYE5Q3fCNfvFzewIhS3vDX0Vp4l292rc6OR09WjT8xlKbBjp6sGn9iCGWwcXiXbx64lh4Rg6jaCiZR
+PBGRD7/gKKCR1z/WPe4EKqd4/g8HAK2cG4D6q6UgIvL6p4ZnOxCCJdS8GP6Bg4BOhnr+pc/36AMFvHm69lZ3rgKUM2SAQWeQ
+fDKqcTHyCk4Cqhjb4y999pw2yCFvfr4e0XvikL9ME+SK4zHii0xJAie9gbjHNC2jOcAgHANyz8xevvzpb7SBwxz/8vFUjWfu
+A8wqgGSXebSLJe7yDY4GLnD8bP5OG7t3l2iCTHMSQ3yRBQwgIlK60aEJMsjJs/XYeiaa30uf0AhZ4OTX+MKHGEnwaAQ7JBE+
+xGiGTyNgMCF8SKpLPBrCDCYFH+V/NRWTP2HqS+gAAAAASUVORK5CYII=
+"""
 
 
-# ── 底层操作 ──────────────────────────────────────────────
-def is_running(pattern):
+# ── 用户配置（每个挂件的独立设置） ────────────────────────
+DEFAULT_WCONF = {
+    'args': '',            # 附加启动参数
+    'delay': 0,            # 崩溃后延迟多少秒再拉起（由守护遵守）
+    'auto_restart': True,  # 是否由守护自动重启
+    'font': '',            # 挂件字体，留空=跟随系统默认
+}
+
+
+_settings_cache = {'mtime': None, 'data': {}}
+
+
+def load_settings():
+    """读取设置，按 mtime 缓存（每 3 秒刷新界面时不再重复解析 JSON）。"""
     try:
-        r = subprocess.run(['pgrep', '-f', pattern],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=5)
-        return r.returncode == 0
+        mtime = os.path.getmtime(SETTINGS_PATH)
+    except OSError:
+        _settings_cache['mtime'] = None
+        _settings_cache['data'] = {}
+        return _settings_cache['data']
+    if _settings_cache['mtime'] == mtime:
+        return _settings_cache['data']
+    try:
+        with open(SETTINGS_PATH) as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            data = {}
     except Exception:
+        data = {}
+    _settings_cache['mtime'] = mtime
+    _settings_cache['data'] = data
+    return data
+
+
+def save_settings(data):
+    try:
+        os.makedirs(MARK_DIR, exist_ok=True)
+        tmp = SETTINGS_PATH + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, SETTINGS_PATH)
+        _settings_cache['mtime'] = None
+        _settings_cache['data'] = {}
+        return True
+    except Exception as e:
+        print('save settings failed: %s' % e, file=sys.stderr)
         return False
+
+
+def wconf(key):
+    conf = dict(DEFAULT_WCONF)
+    conf.update(load_settings().get(key) or {})
+    return conf
+
+
+def set_wconf(key, conf):
+    data = load_settings()
+    data[key] = {k: conf.get(k, v) for k, v in DEFAULT_WCONF.items()}
+    return save_settings(data)
+
+
+# ── 进程状态（单次 /proc 快照，避免 17 次 pgrep 卡住界面） ──
+def _proc_cmdlines():
+    """收集全机进程命令行。
+
+    同时用两种方式：直接读 /proc（真实桌面会话）与一次 `pgrep -af .`
+    （某些容器/沙箱里 /proc 被裁剪时兜底），合并去重。
+    每次刷新只发一次外部进程，界面不会卡。
+    """
+    me = str(os.getpid())
+    lines = []
+
+    def add(line):
+        line = line.strip()
+        if not line:
+            return
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[0] == me:
+            return
+        lines.append(line)
+
+    try:
+        for pid in os.listdir('/proc'):
+            if not pid.isdigit():
+                continue
+            try:
+                with open('/proc/%s/cmdline' % pid, 'rb') as f:
+                    raw = f.read()
+            except OSError:
+                continue
+            if raw:
+                add(raw.replace(b'\0', b' ').decode('utf-8', 'replace'))
+    except OSError:
+        pass
+    try:
+        out = subprocess.run(['pgrep', '-af', '.'], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, timeout=6).stdout
+        for line in out.decode('utf-8', 'replace').splitlines():
+            if 'pgrep' in line.split(None, 1)[-1][:8]:
+                continue
+            add(line)
+    except Exception:
+        pass
+    return lines
+
+
+def running_keys():
+    snap = _proc_cmdlines()
+    found = set()
+    for key, _cmd, pattern, _label in WIDGETS:
+        for line in snap:
+            if pattern in line:
+                found.add(key)
+                break
+    return found
+
+
+def is_running(pattern):
+    for line in _proc_cmdlines():
+        if pattern in line:
+            return True
+    return False
 
 
 def is_disabled(key):
@@ -93,6 +247,12 @@ def set_enabled(key, enable):
             open(mark, 'w').close()
         except Exception:
             pass
+
+
+def widget_cmd(key):
+    base = WIDGET_MAP[key][1]
+    args = (wconf(key).get('args') or '').strip()
+    return (base + ' ' + args).strip() if args else base
 
 
 def start_widget(cmd):
@@ -122,7 +282,7 @@ def restart_supervisor():
         print('supervisor restart failed: %s' % e, file=sys.stderr)
 
 
-# ── 控制中心「开机自启」开关 ─────────────────────────────
+# ── 开机自启 ─────────────────────────────────────────────
 AUTOSTART_SRC = '/usr/local/share/applications/desktop-widgets-hub.desktop'
 AUTOSTART_DST = os.path.join(HOME, '.config', 'autostart', 'desktop-widgets-hub.desktop')
 
@@ -149,215 +309,1097 @@ def set_autostart(enable):
         print('autostart toggle failed: %s' % e, file=sys.stderr)
 
 
-# ── 单行（一个挂件） ─────────────────────────────────────
-class HubRow(Gtk.ListBoxRow):
-    def __init__(self, key, cmd, pattern, label):
-        super().__init__()
-        self.key = key
-        self.cmd = cmd
-        self.pattern = pattern
-        self.label = label
-        self._updating = False
+# ── 图标 ─────────────────────────────────────────────────
+def ensure_icon():
+    try:
+        os.makedirs(os.path.dirname(ICON_PATH), exist_ok=True)
+        data = base64.b64decode(ICON_B64.encode('ascii'))
+        old = None
+        if os.path.exists(ICON_PATH):
+            with open(ICON_PATH, 'rb') as f:
+                old = f.read()
+        if old != data:
+            with open(ICON_PATH, 'wb') as f:
+                f.write(data)
+        return ICON_PATH
+    except Exception:
+        return None
 
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        box.set_margin_start(10)
-        box.set_margin_end(10)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        self.add(box)
 
-        self.dot = Gtk.Label()
-        self.dot.set_markup('<span foreground="#888888" font="Sans 14">●</span>')
-        box.pack_start(self.dot, False, False, 0)
+# ── 版本 / 更新 ─────────────────────────────────────────
+def _ver_tuple(s):
+    out = []
+    for part in str(s).strip().lstrip('vV').split('.'):
+        num = ''
+        for ch in part:
+            if ch.isdigit():
+                num += ch
+            else:
+                break
+        out.append(int(num) if num else 0)
+    while len(out) < 3:
+        out.append(0)
+    return tuple(out)
 
-        name = Gtk.Label()
-        name.set_markup('<b>%s</b>\n<span foreground="#888888" size="small">%s</span>' % (label, key))
-        name.set_xalign(0)
-        box.pack_start(name, True, True, 0)
 
-        self.switch = Gtk.Switch()
-        self.switch.connect('notify::active', self._on_switch)
-        box.pack_start(self.switch, False, False, 0)
+def installed_version():
+    try:
+        out = subprocess.check_output(
+            ['dpkg-query', '-W', '-f=${Version}', PKG_NAME],
+            stderr=subprocess.DEVNULL, timeout=5).decode().strip()
+        if out:
+            return out
+    except Exception:
+        pass
+    return VERSION
 
-        btn_restart = Gtk.Button(label='重启')
-        btn_restart.connect('clicked', lambda b: self.do_restart())
-        box.pack_start(btn_restart, False, False, 0)
 
-        btn_stop = Gtk.Button(label='停止')
-        btn_stop.connect('clicked', lambda b: self.do_stop())
-        box.pack_start(btn_stop, False, False, 0)
+def load_update_cfg():
+    cfg = {'repo': DEFAULT_REPO, 'token': '', 'feed': ''}
+    try:
+        with open(UPDATE_CFG_PATH) as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            cfg.update({k: v for k, v in data.items() if k in cfg})
+    except Exception:
+        pass
+    # 环境变量优先
+    cfg['token'] = os.environ.get('WIDGET_SUITE_TOKEN') or os.environ.get('GH_TOKEN') or cfg.get('token') or ''
+    return cfg
 
-    def _on_switch(self, sw, *a):
-        if self._updating:
-            return
-        active = sw.get_active()
-        set_enabled(self.key, active)
-        if active:
-            if not is_running(self.pattern):
-                start_widget(self.cmd)
+
+def save_update_cfg(cfg):
+    try:
+        os.makedirs(MARK_DIR, exist_ok=True)
+        with open(UPDATE_CFG_PATH, 'w') as f:
+            json.dump({k: cfg.get(k, '') for k in ('repo', 'token', 'feed')},
+                      f, ensure_ascii=False, indent=2)
+        os.chmod(UPDATE_CFG_PATH, 0o600)
+        return True
+    except Exception:
+        return False
+
+
+def _http_json(url, token='', timeout=12):
+    req = urllib.request.Request(url, headers={
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'desktop-widgets-hub/%s' % VERSION,
+    })
+    if token:
+        req.add_header('Authorization', 'Bearer ' + token)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode('utf-8'))
+
+
+def check_update():
+    """返回 dict: {'ok':bool, 'latest':str, 'url':str, 'notes':str, 'error':str, 'need_token':bool}"""
+    cfg = load_update_cfg()
+    res = {'ok': False, 'latest': '', 'url': '', 'notes': '', 'error': '', 'need_token': False}
+    try:
+        if cfg.get('feed'):
+            data = _http_json(cfg['feed'], cfg.get('token', ''))
+            res['latest'] = str(data.get('version') or data.get('tag_name') or '').lstrip('vV')
+            res['url'] = data.get('deb') or data.get('url') or ''
+            res['notes'] = data.get('notes') or data.get('body') or ''
         else:
-            stop_widget(self.pattern)
-
-    def do_restart(self):
-        enabled = not is_disabled(self.key)
-        if is_running(self.pattern):
-            stop_widget(self.pattern)
-            time.sleep(1)
-        if enabled:
-            start_widget(self.cmd)
-
-    def do_stop(self):
-        set_enabled(self.key, False)
-        stop_widget(self.pattern)
-        GLib.timeout_add(400, self.refresh)
-
-    def refresh(self):
-        running = is_running(self.pattern)
-        disabled = is_disabled(self.key)
-        if disabled:
-            dot = '<span foreground="#888888" font="Sans 14">●</span>'
-            state = '已禁用'
-        elif running:
-            dot = '<span foreground="#2ecc71" font="Sans 14">●</span>'
-            state = '运行中'
+            url = 'https://api.github.com/repos/%s/releases/latest' % cfg['repo']
+            data = _http_json(url, cfg.get('token', ''))
+            res['latest'] = str(data.get('tag_name') or '').lstrip('vV')
+            res['notes'] = data.get('body') or ''
+            for asset in data.get('assets') or []:
+                name = (asset.get('name') or '').lower()
+                if name.endswith('.deb'):
+                    res['url'] = asset.get('browser_download_url') or ''
+                    break
+            if not res['url']:
+                res['error'] = '最新发行版里没有 .deb 资源'
+                return res
+        if not res['latest']:
+            res['error'] = '未能解析版本号'
+            return res
+        res['ok'] = True
+        return res
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 404):
+            res['error'] = '私有仓库需要访问令牌（设置 → 更新）'
+            res['need_token'] = True
+        elif e.code == 403:
+            res['error'] = 'GitHub 拒绝访问（令牌无 release 权限或已限流）'
+            res['need_token'] = True
         else:
-            dot = '<span foreground="#e67e22" font="Sans 14">●</span>'
-            state = '未运行'
-        self.dot.set_markup(dot)
-
-        self._updating = True
-        self.switch.set_active(not disabled)
-        self._updating = False
-
-        # 更新第二行状态文字：name 标签是 box 的第 2 个子（index 1）
-        box = self.get_child()
-        name = box.get_children()[1]
-        name.set_markup('<b>%s</b>\n<span foreground="#888888" size="small">%s · %s</span>'
-                        % (self.label, self.key, state))
+            res['error'] = 'HTTP %s' % e.code
+        return res
+    except Exception as e:
+        res['error'] = '网络不可用：%s' % e
+        return res
 
 
-# ── 主窗口 ───────────────────────────────────────────────
-class HubWindow(Gtk.Window):
-    def __init__(self):
-        super().__init__(title='桌面挂件控制中心')
-        self.set_default_size(460, 640)
-        self.set_border_width(0)
+def cache_write(latest):
+    try:
+        os.makedirs(MARK_DIR, exist_ok=True)
+        with open(UPDATE_CACHE_PATH, 'w') as f:
+            json.dump({'checked_at': time.time(), 'latest': latest}, f)
+    except Exception:
+        pass
 
-        header = Gtk.HeaderBar()
-        header.set_show_close_button(True)
-        header.set_title('桌面挂件控制中心')
-        self.set_titlebar(header)
 
-        # 开机自启开关
-        auto_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        auto_lbl = Gtk.Label(label='开机自启')
-        auto_box.pack_start(auto_lbl, False, False, 0)
-        self.autostart_switch = Gtk.Switch()
-        self.autostart_switch.connect('notify::active', self._on_autostart)
-        auto_box.pack_start(self.autostart_switch, False, False, 0)
-        header.pack_start(auto_box)
+def cache_read():
+    try:
+        with open(UPDATE_CACHE_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-        self._updating_autostart = True
-        self.autostart_switch.set_active(autostart_enabled())
-        self._updating_autostart = False
 
-        btn_refresh = Gtk.Button(label='刷新')
-        btn_refresh.connect('clicked', lambda b: self.refresh_all())
-        header.pack_end(btn_refresh)
+def download(url, token, dest, progress=None):
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'desktop-widgets-hub/%s' % VERSION,
+        'Accept': 'application/octet-stream',
+    })
+    if token:
+        req.add_header('Authorization', 'Bearer ' + token)
+    with urllib.request.urlopen(req, timeout=30) as r, open(dest, 'wb') as f:
+        total = int(r.headers.get('Content-Length') or 0)
+        got = 0
+        while True:
+            chunk = r.read(65536)
+            if not chunk:
+                break
+            f.write(chunk)
+            got += len(chunk)
+            if progress and total:
+                progress(got, total)
+    return dest
 
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.add(vbox)
 
-        # 全局工具条
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        toolbar.set_margin_start(10); toolbar.set_margin_end(10)
-        toolbar.set_margin_top(8); toolbar.set_margin_bottom(8)
-        for label, cb in [
-            ('全部启动', self.all_start),
-            ('全部停止', self.all_stop),
-            ('重启守护', self.restart_daemon),
-        ]:
-            b = Gtk.Button(label=label)
-            b.connect('clicked', cb)
-            toolbar.pack_start(b, False, False, 0)
-        self.status = Gtk.Label()
-        self.status.set_xalign(1)
-        self.status.set_markup('<span foreground="#888888" size="small">就绪</span>')
-        toolbar.pack_end(self.status, False, False, 0)
-        vbox.pack_start(toolbar, False, False, 0)
+def install_deb_root(path):
+    """以 root 身份安装 .deb（Deepin 不可变系统优先走 immutable-ctl）。"""
+    cmds = []
+    if shutil.which('deepin-immutable-ctl'):
+        cmds.append(['deepin-immutable-ctl', 'admin', 'exec', '--',
+                     'dpkg', '-i', '--force-confask,confnew,overwrite', path])
+    cmds.append(['dpkg', '-i', '--force-confask,confnew,overwrite', path])
+    last = 1
+    for cmd in cmds:
+        try:
+            r = subprocess.run(cmd)
+            last = r.returncode
+            if last == 0:
+                subprocess.run(['apt-get', 'install', '-f', '-y'],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return 0
+        except Exception as e:
+            print('install failed: %s' % e, file=sys.stderr)
+    return last
 
-        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        vbox.pack_start(sep, False, False, 0)
 
-        # 列表
-        self.listbox = Gtk.ListBox()
-        self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.add(self.listbox)
-        vbox.pack_start(scrolled, True, True, 0)
+# ── 平滑滚动 ─────────────────────────────────────────────
+def _install_scroller(scrolled, classes):
+    from gi.repository import Gdk, GLib
 
-        self.rows = []
-        for key, cmd, pattern, label in WIDGETS:
-            row = HubRow(key, cmd, pattern, label)
-            self.listbox.add(row)
-            self.rows.append(row)
+    adj = scrolled.get_vadjustment()
+    state = {'target': None, 'tick': None, 'drag_y': None, 'drag_v': 0.0}
+    step = 74.0
 
-        self.refresh_all()
-        # 自动刷新
-        GLib.timeout_add(3000, self._auto_refresh)
+    def clamp(v):
+        lo = adj.get_lower()
+        hi = max(lo, adj.get_upper() - adj.get_page_size())
+        return max(lo, min(hi, v))
 
-    def _auto_refresh(self):
-        self.refresh_all(silent=True)
+    def animate():
+        tgt = state['target']
+        if tgt is None:
+            state['tick'] = None
+            return False
+        cur = adj.get_value()
+        diff = tgt - cur
+        if abs(diff) < 0.7:
+            adj.set_value(tgt)
+            state['target'] = None
+            state['tick'] = None
+            return False
+        adj.set_value(cur + diff * 0.36)
         return True
 
-    def _on_autostart(self, sw, *a):
-        if getattr(self, '_updating_autostart', False):
-            return
-        enable = sw.get_active()
-        set_autostart(enable)
-        self.status.set_markup('<span foreground="#3498db" size="small">开机自启已%s</span>'
-                               % ('开启' if enable else '关闭'))
+    def on_scroll(widget, ev):
+        d = ev.direction
+        delta = 0.0
+        if d == Gdk.ScrollDirection.SMOOTH:
+            ok, _dx, dy = ev.get_scroll_deltas()
+            if not ok:
+                return False
+            delta = dy * step * 1.25
+        elif d == Gdk.ScrollDirection.UP:
+            delta = -step
+        elif d == Gdk.ScrollDirection.DOWN:
+            delta = step
+        else:
+            return False
+        cur = state['target'] if state['target'] is not None else adj.get_value()
+        state['target'] = clamp(cur + delta)
+        if state['tick'] is None:
+            state['tick'] = GLib.timeout_add(15, animate)
+        return True
 
-    def refresh_all(self, silent=False):
-        run = dis = 0
-        for row in self.rows:
-            row.refresh()
-            if is_disabled(row.key):
-                dis += 1
-            elif is_running(row.pattern):
-                run += 1
-        total = len(self.rows)
-        if not silent:
-            self.status.set_markup('<span foreground="#888888" size="small">共 %d · 运行 %d · 停用 %d</span>' % (total, run, dis))
+    def on_press(widget, ev):
+        if ev.button != 1:
+            return False
+        if isinstance(ev.widget, classes):
+            return False       # 点在按钮 / 开关上，交给控件自己处理
+        state['drag_y'] = ev.y_root
+        state['drag_v'] = adj.get_value()
+        state['target'] = None
+        return True
 
-    def all_start(self, btn):
-        for row in self.rows:
-            set_enabled(row.key, True)
-            if not is_running(row.pattern):
-                start_widget(row.cmd)
-        GLib.timeout_add(500, self.refresh_all)
-        self.status.set_markup('<span foreground="#2ecc71" size="small">已发送全部启动</span>')
+    def on_motion(widget, ev):
+        if state['drag_y'] is None:
+            return False
+        dy = ev.y_root - state['drag_y']
+        if abs(dy) > 2:
+            adj.set_value(clamp(state['drag_v'] - dy))
+        return True
 
-    def all_stop(self, btn):
-        for row in self.rows:
-            set_enabled(row.key, False)
-            stop_widget(row.pattern)
-        GLib.timeout_add(500, self.refresh_all)
-        self.status.set_markup('<span foreground="#e67e22" size="small">已发送全部停止</span>')
+    def on_release(widget, ev):
+        state['drag_y'] = None
+        return False
 
-    def restart_daemon(self, btn):
-        restart_supervisor()
-        GLib.timeout_add(800, self.refresh_all)
-        self.status.set_markup('<span foreground="#3498db" size="small">守护已重启</span>')
+    scrolled.add_events(Gdk.EventMask.SMOOTH_SCROLL_MASK)
+    scrolled.connect('scroll-event', on_scroll)
+    scrolled.connect('button-press-event', on_press)
+    scrolled.connect('button-release-event', on_release)
+    scrolled.connect('motion-notify-event', on_motion)
+
+
+# ── 界面 ─────────────────────────────────────────────────
+def build_ui():
+    import gi
+    gi.require_version('Gtk', '3.0')
+    from gi.repository import Gtk, Gdk, GLib, Gio, Pango
+
+    def icon_btn(icon_name, tip, fallback, cb):
+        theme = Gtk.IconTheme.get_default()
+        if icon_name and theme.has_icon(icon_name):
+            b = Gtk.Button()
+            img = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.BUTTON)
+            b.add(img)
+            b.set_relief(Gtk.ReliefStyle.NONE)
+        else:
+            b = Gtk.Button(label=fallback)
+        b.set_tooltip_text(tip)
+        b.connect('clicked', lambda *_a: cb())
+        return b
+
+    class WidgetSettingsDialog(Gtk.Dialog):
+        def __init__(self, parent, key, on_saved):
+            _k, cmd, pattern, label = WIDGET_MAP[key]
+            conf = wconf(key)
+            super().__init__(title='设置 · %s' % label, transient_for=parent, modal=True)
+            self.set_default_size(440, -1)
+            self.add_button('取消', Gtk.ResponseType.CANCEL)
+            self.add_button('保存', Gtk.ResponseType.OK)
+            self.key = key
+            self.on_saved = on_saved
+
+            box = self.get_content_area()
+            box.set_spacing(10)
+            box.set_margin_start(16); box.set_margin_end(16)
+            box.set_margin_top(14); box.set_margin_bottom(6)
+
+            head = Gtk.Label()
+            head.set_markup('<b>%s</b>\n<span foreground="#888888" size="small">%s</span>'
+                            % (label, key))
+            head.set_xalign(0)
+            box.pack_start(head, False, False, 0)
+
+            grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+            box.pack_start(grid, False, False, 0)
+            r = 0
+
+            def add_row(text, widget, tip=None):
+                nonlocal r
+                lbl = Gtk.Label(label=text)
+                lbl.set_xalign(0)
+                if tip:
+                    lbl.set_tooltip_text(tip)
+                grid.attach(lbl, 0, r, 1, 1)
+                widget.set_hexpand(True)
+                grid.attach(widget, 1, r, 1, 1)
+                r += 1
+                return widget
+
+            self.e_cmd = add_row('启动命令', Gtk.Entry())
+            self.e_cmd.set_text(cmd)
+            self.e_cmd.set_sensitive(False)
+
+            self.e_args = add_row('附加参数', Gtk.Entry(), '例如 --no-sound，追加在启动命令之后')
+            self.e_args.set_text(conf.get('args') or '')
+            self.e_args.set_placeholder_text('留空表示默认')
+
+            self.sp_delay = add_row('崩溃重启延迟', Gtk.SpinButton.new_with_range(0, 600, 1),
+                                    '挂件异常退出后等待多少秒再拉起（由守护遵守）')
+            self.sp_delay.set_value(int(conf.get('delay') or 0))
+
+            self.sw_auto = add_row('自动重启', Gtk.Switch(),
+                                   '关闭后该挂件崩溃不会被守护拉起，也不会开机自动启动')
+            self.sw_auto.set_active(bool(conf.get('auto_restart', True)))
+            self.sw_auto.set_halign(Gtk.Align.START)
+
+            sysfont = Gtk.Label()
+            sysfont.set_markup('<span foreground="#888888" size="small">%s</span>' % _system_font_hint())
+            self.e_font = add_row('挂件字体', Gtk.Entry(),
+                                  '留空跟随系统默认字体；填写字体族名可单独指定该挂件字体')
+            self.e_font.set_text(conf.get('font') or '')
+            self.e_font.set_placeholder_text('跟随系统默认')
+            grid.attach(sysfont, 1, r, 1, 1)
+            r += 1
+
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            b_dir = Gtk.Button(label='打开安装目录')
+            b_dir.connect('clicked', lambda *_a: _open_dir(os.path.dirname(pattern)))
+            row.pack_start(b_dir, False, False, 0)
+            b_cfg = Gtk.Button(label='打开配置目录')
+            b_cfg.connect('clicked', lambda *_a: _open_dir(MARK_DIR))
+            row.pack_start(b_cfg, False, False, 0)
+            self.sw_restart = Gtk.CheckButton(label='保存后重启该挂件')
+            self.sw_restart.set_active(True)
+            row.pack_end(self.sw_restart, False, False, 0)
+            box.pack_start(row, False, False, 0)
+
+            note = Gtk.Label()
+            note.set_markup('<span foreground="#888888" size="small">'
+                            '字体设置只对支持字体跟随的挂件生效，保存后建议重启该挂件。</span>')
+            note.set_xalign(0)
+            note.set_line_wrap(True)
+            box.pack_start(note, False, False, 4)
+
+            self.connect('response', self._on_response)
+            self.show_all()
+
+        def _on_response(self, dlg, resp):
+            if resp == Gtk.ResponseType.OK:
+                conf = {
+                    'args': self.e_args.get_text().strip(),
+                    'delay': int(self.sp_delay.get_value()),
+                    'auto_restart': bool(self.sw_auto.get_active()),
+                    'font': self.e_font.get_text().strip(),
+                }
+                set_wconf(self.key, conf)
+                _write_font_override(self.key, conf['font'])
+                if self.sw_restart.get_active() and is_running(WIDGET_MAP[self.key][2]):
+                    stop_widget(WIDGET_MAP[self.key][2])
+                    GLib.timeout_add(900, lambda: (start_widget(widget_cmd(self.key)), False)[1])
+                self.on_saved(self.key)
+            self.destroy()
+
+    def _open_dir(path):
+        try:
+            if os.path.isdir(path):
+                subprocess.Popen(['xdg-open', path], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            print('open dir failed: %s' % e, file=sys.stderr)
+
+    def _system_font_hint():
+        try:
+            out = subprocess.check_output(['gsettings', 'get', 'org.gnome.desktop.interface', 'font-name'],
+                                          stderr=subprocess.DEVNULL, timeout=4).decode().strip()
+            out = out.strip("'").strip('"')
+            parts = out.rsplit(None, 1)
+            name = parts[0] if len(parts) == 2 and parts[1].isdigit() else out
+            return '系统默认：%s' % name
+        except Exception:
+            return '系统默认字体'
+
+    def _write_font_override(key, font):
+        path = os.path.join(MARK_DIR, 'font-%s.txt' % key)
+        try:
+            os.makedirs(MARK_DIR, exist_ok=True)
+            if font:
+                with open(path, 'w') as f:
+                    f.write(font + '\n')
+            elif os.path.exists(path):
+                os.remove(path)
+        except Exception as e:
+            print('font override failed: %s' % e, file=sys.stderr)
+
+    def _open_url(url):
+        try:
+            Gio.AppInfo.launch_default_for_uri(url, None)
+        except Exception:
+            subprocess.Popen(['xdg-open', url], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    return (Gtk, Gdk, GLib, Gio, Pango, icon_btn, WidgetSettingsDialog, _open_dir, _open_url)
+
+
+# ── 应用程序 ─────────────────────────────────────────────
+def run_app():
+    import gi
+    gi.require_version('Gtk', '3.0')
+    from gi.repository import Gtk, Gdk, GLib, Gio
+
+    (Gtk, Gdk, GLib, Gio, Pango, icon_btn,
+     WidgetSettingsDialog, open_dir, open_url) = build_ui()
+
+    ICON = ensure_icon()
+
+    class HubRow(Gtk.ListBoxRow):
+        def __init__(self, key, cmd, pattern, label, win):
+            super().__init__()
+            self.key = key
+            self.base_cmd = cmd
+            self.pattern = pattern
+            self.label = label
+            self.win = win
+            self._updating = False
+
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            box.set_margin_start(12); box.set_margin_end(10)
+            box.set_margin_top(5); box.set_margin_bottom(5)
+            self.add(box)
+
+            self.dot = Gtk.Label()
+            self.dot.set_markup('<span foreground="#b0b0b0">●</span>')
+            self.dot.set_size_request(14, -1)
+            box.pack_start(self.dot, False, False, 0)
+
+            self.name = Gtk.Label()
+            self.name.set_ellipsize(Pango.EllipsizeMode.END)
+            self.name.set_max_width_chars(18)
+            self.name.set_xalign(0)
+            box.pack_start(self.name, True, True, 0)
+
+            self.switch = Gtk.Switch()
+            self.switch.set_valign(Gtk.Align.CENTER)
+            self.switch.connect('notify::active', self._on_switch)
+            box.pack_start(self.switch, False, False, 0)
+
+            b_set = icon_btn('preferences-system', '设置', '设置', self.open_settings)
+            box.pack_start(b_set, False, False, 0)
+            b_re = icon_btn('view-refresh', '重启', '重启', self.do_restart)
+            box.pack_start(b_re, False, False, 0)
+            b_st = icon_btn('process-stop', '停止', '停止', self.do_stop)
+            box.pack_start(b_st, False, False, 0)
+
+        def open_settings(self):
+            WidgetSettingsDialog(self.win, self.key, lambda k: self.win.refresh_all())
+
+        def _on_switch(self, sw, *a):
+            if self._updating:
+                return
+            active = sw.get_active()
+            if active:
+                set_wconf(self.key, dict(wconf(self.key), auto_restart=True))
+                set_enabled(self.key, True)
+                if not is_running(self.pattern):
+                    start_widget(widget_cmd(self.key))
+            else:
+                set_enabled(self.key, False)
+                stop_widget(self.pattern)
+            GLib.timeout_add(500, self.win.refresh_all)
+
+        def do_restart(self):
+            enabled = not is_disabled(self.key)
+            if is_running(self.pattern):
+                stop_widget(self.pattern)
+                time.sleep(0.8)
+            if enabled:
+                start_widget(widget_cmd(self.key))
+            GLib.timeout_add(700, self.win.refresh_all)
+
+        def do_stop(self):
+            set_enabled(self.key, False)
+            stop_widget(self.pattern)
+            GLib.timeout_add(400, self.win.refresh_all)
+
+        def refresh(self, running=None):
+            running = is_running(self.pattern) if running is None else running
+            disabled = is_disabled(self.key)
+            if disabled:
+                dot = '<span foreground="#9aa0a6">●</span>'
+                state = '已禁用'
+            elif running:
+                dot = '<span foreground="#2ecc71">●</span>'
+                state = '运行中'
+            else:
+                dot = '<span foreground="#e67e22">●</span>'
+                state = '未运行'
+            self.dot.set_markup(dot)
+
+            conf = wconf(self.key)
+            extra = []
+            if conf.get('args'):
+                extra.append('参数')
+            if not conf.get('auto_restart', True):
+                extra.append('不自动重启')
+            if conf.get('font'):
+                extra.append('字体 ' + conf['font'])
+            tail = (' · ' + ' · '.join(extra)) if extra else ''
+            self.name.set_markup(
+                '<b>%s</b>\n<span foreground="#8b8b8b" size="small">%s · %s%s</span>'
+                % (self.label, self.key, state, tail))
+
+            self._updating = True
+            self.switch.set_active(not disabled)
+            self._updating = False
+
+    class HubWindow(Gtk.ApplicationWindow):
+        def __init__(self, app):
+            super().__init__(application=app, title='桌面挂件控制中心')
+            self.set_default_size(600, 760)
+            self.set_size_request(600, 560)
+            self.set_position(Gtk.WindowPosition.CENTER)
+            if ICON:
+                try:
+                    self.set_icon_from_file(ICON)
+                except Exception:
+                    pass
+            self._update_info = None
+            self._busy = False
+
+            header = Gtk.HeaderBar()
+            header.set_show_close_button(True)
+            header.set_title('桌面挂件控制中心')
+            header.set_subtitle('v%s' % VERSION)
+            self.set_titlebar(header)
+
+            auto_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            auto_box.pack_start(Gtk.Label(label='开机自启'), False, False, 0)
+            self.autostart_switch = Gtk.Switch()
+            self.autostart_switch.set_valign(Gtk.Align.CENTER)
+            self.autostart_switch.connect('notify::active', self._on_autostart)
+            auto_box.pack_start(self.autostart_switch, False, False, 0)
+            header.pack_start(auto_box)
+            self._updating_autostart = True
+            self.autostart_switch.set_active(autostart_enabled())
+            self._updating_autostart = False
+
+            # 右上角菜单
+            mb = Gtk.MenuButton()
+            mb.set_relief(Gtk.ReliefStyle.NONE)
+            if Gtk.IconTheme.get_default().has_icon('open-menu-symbolic'):
+                mb.add(Gtk.Image.new_from_icon_name('open-menu-symbolic', Gtk.IconSize.BUTTON))
+            else:
+                mb.set_label('⋮')
+            pop = Gtk.Popover()
+            vbox_m = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            vbox_m.set_margin_start(6); vbox_m.set_margin_end(6)
+            vbox_m.set_margin_top(6); vbox_m.set_margin_bottom(6)
+            for text, cb in [
+                ('检查更新', self.check_update_clicked),
+                ('更新设置…', self.open_update_settings),
+                ('关于', self.show_about),
+                ('隐藏到托盘', self.hide_window),
+            ]:
+                b = Gtk.ModelButton(label=text)
+                b.connect('clicked', lambda _b, c=cb: (pop.popdown(), c()))
+                vbox_m.pack_start(b, False, False, 0)
+            pop.add(vbox_m)
+            vbox_m.show_all()
+            mb.set_popover(pop)
+            header.pack_end(mb)
+
+            btn_refresh = icon_btn('view-refresh', '刷新', '刷新', lambda: self.refresh_all())
+            header.pack_end(btn_refresh)
+
+            outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            self.add(outer)
+
+            # 更新横幅
+            self.banner = Gtk.Revealer()
+            bbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            bbox.set_margin_start(12); bbox.set_margin_end(12)
+            bbox.set_margin_top(8); bbox.set_margin_bottom(8)
+            self.banner_lbl = Gtk.Label()
+            self.banner_lbl.set_xalign(0)
+            self.banner_lbl.set_line_wrap(True)
+            self.banner_lbl.set_max_width_chars(34)
+            bbox.pack_start(self.banner_lbl, True, True, 0)
+            self.btn_update = Gtk.Button(label='立即更新')
+            self.btn_update.get_style_context().add_class('suggested-action')
+            self.btn_update.connect('clicked', lambda *_a: self.do_update())
+            bbox.pack_start(self.btn_update, False, False, 0)
+            b_ignore = Gtk.Button(label='忽略')
+            b_ignore.connect('clicked', lambda *_a: self.banner.set_reveal_child(False))
+            bbox.pack_start(b_ignore, False, False, 0)
+            self.banner.add(bbox)
+            outer.pack_start(self.banner, False, False, 0)
+
+            # 工具条
+            toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            toolbar.set_margin_start(10); toolbar.set_margin_end(10)
+            toolbar.set_margin_top(8); toolbar.set_margin_bottom(8)
+            for label, cb in [
+                ('全部启动', self.all_start),
+                ('全部停止', self.all_stop),
+                ('重启守护', self.restart_daemon),
+            ]:
+                b = Gtk.Button(label=label)
+                b.connect('clicked', cb)
+                toolbar.pack_start(b, False, False, 0)
+            self.status = Gtk.Label()
+            self.status.set_xalign(1)
+            self.status.set_ellipsize(Pango.EllipsizeMode.END)
+            self.status.set_max_width_chars(24)
+            self.status.set_markup('<span foreground="#8b8b8b" size="small">就绪</span>')
+            toolbar.pack_end(self.status, False, False, 0)
+            outer.pack_start(toolbar, False, False, 0)
+
+            outer.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 0)
+
+            self.listbox = Gtk.ListBox()
+            self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+            self.listbox.set_activate_on_single_click(False)
+            scrolled = Gtk.ScrolledWindow()
+            scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            scrolled.set_kinetic_scrolling(True)
+            scrolled.set_overlay_scrolling(True)
+            scrolled.set_propagate_natural_height(False)
+            scrolled.set_propagate_natural_width(False)
+            scrolled.set_min_content_height(240)
+            scrolled.set_min_content_width(520)
+            try:
+                scrolled.set_max_content_height(560)
+                scrolled.set_max_content_width(600)
+            except Exception:
+                pass
+            scrolled.add(self.listbox)
+            outer.pack_start(scrolled, True, True, 0)
+            _install_scroller(scrolled, (Gtk.Button, Gtk.Switch, Gtk.ToggleButton, Gtk.CheckButton))
+
+            self.rows = []
+            for key, cmd, pattern, label in WIDGETS:
+                row = HubRow(key, cmd, pattern, label, self)
+                self.listbox.add(row)
+                self.rows.append(row)
+
+            # 底部：版本 + 更新
+            outer.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 0)
+            foot = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            foot.set_margin_start(12); foot.set_margin_end(12)
+            foot.set_margin_top(6); foot.set_margin_bottom(6)
+            ver = Gtk.Label()
+            ver.set_markup('<span foreground="#8b8b8b" size="small">桌面挂件合集 v%s</span>' % installed_version())
+            ver.set_xalign(0)
+            foot.pack_start(ver, False, False, 0)
+            self.update_lbl = Gtk.Label()
+            self.update_lbl.set_markup('<span foreground="#8b8b8b" size="small"></span>')
+            self.update_lbl.set_xalign(0)
+            self.update_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            self.update_lbl.set_max_width_chars(28)
+            foot.pack_start(self.update_lbl, True, True, 0)
+            self.btn_check = Gtk.Button(label='检查更新')
+            self.btn_check.set_relief(Gtk.ReliefStyle.NONE)
+            self.btn_check.connect('clicked', lambda *_a: self.check_update_clicked())
+            foot.pack_end(self.btn_check, False, False, 0)
+            outer.pack_start(foot, False, False, 0)
+
+            if os.environ.get('HUB_DEBUG'):
+                def _dump():
+                    mn, nat = self.get_preferred_size()
+                    print('[hub-debug] size=%s pref=%s sc=%s'
+                          % ((self.get_size()), (nat.width, nat.height),
+                             (scrolled.get_preferred_size()[1].width, scrolled.get_preferred_size()[1].height)),
+                          file=sys.stderr)
+                    return True
+                for _d in (1200, 2500, 4000, 6000):
+                    GLib.timeout_add(_d, _dump)
+            self.connect('delete-event', self._on_delete)
+            self.refresh_all()
+            GLib.timeout_add(3000, self._auto_refresh)
+            GLib.timeout_add(2500, self._auto_check_update)
+
+        # ── 状态刷新 ──
+        def _auto_refresh(self):
+            self.refresh_all(silent=True)
+            return True
+
+        def refresh_all(self, silent=False):
+            running = running_keys()
+            run = dis = 0
+            for row in self.rows:
+                disabled = is_disabled(row.key)
+                row.refresh(running=row.key in running)
+                if disabled:
+                    dis += 1
+                elif row.key in running:
+                    run += 1
+            total = len(self.rows)
+            if not silent:
+                self.status.set_markup(
+                    '<span foreground="#8b8b8b" size="small">共 %d · 运行 %d · 停用 %d</span>'
+                    % (total, run, dis))
+            return False
+
+        def _on_delete(self, *_a):
+            self.hide()
+            return True
+
+        def hide_window(self):
+            self.hide()
+
+        def _on_autostart(self, sw, *a):
+            if getattr(self, '_updating_autostart', False):
+                return
+            enable = sw.get_active()
+            set_autostart(enable)
+            self.status.set_markup('<span foreground="#3498db" size="small">开机自启已%s</span>'
+                                   % ('开启' if enable else '关闭'))
+
+        # ── 批量操作 ──
+        def all_start(self, btn):
+            for row in self.rows:
+                set_enabled(row.key, True)
+                if not is_running(row.pattern):
+                    start_widget(widget_cmd(row.key))
+            GLib.timeout_add(700, self.refresh_all)
+            self.status.set_markup('<span foreground="#2ecc71" size="small">已发送全部启动</span>')
+
+        def all_stop(self, btn):
+            for row in self.rows:
+                set_enabled(row.key, False)
+                stop_widget(row.pattern)
+            GLib.timeout_add(700, self.refresh_all)
+            self.status.set_markup('<span foreground="#e67e22" size="small">已发送全部停止</span>')
+
+        def restart_daemon(self, btn):
+            restart_supervisor()
+            GLib.timeout_add(900, self.refresh_all)
+            self.status.set_markup('<span foreground="#3498db" size="small">守护已重启</span>')
+
+        # ── 更新 ──
+        def _auto_check_update(self):
+            cache = cache_read()
+            last = float(cache.get('checked_at') or 0)
+            if time.time() - last < 12 * 3600:
+                latest = cache.get('latest')
+                if latest and _ver_tuple(latest) > _ver_tuple(installed_version()):
+                    self.show_update_banner(latest)
+                return False
+            self._check_update(silent=True)
+            return False
+
+        def check_update_clicked(self):
+            self._check_update(silent=False)
+
+        def _check_update(self, silent):
+            if self._busy:
+                return
+            self._busy = True
+            self.btn_check.set_sensitive(False)
+            self.update_lbl.set_markup('<span foreground="#8b8b8b" size="small">正在检查更新…</span>')
+
+            def worker():
+                res = check_update()
+                GLib.idle_add(lambda: self._on_update_result(res, silent))
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def _on_update_result(self, res, silent):
+            self._busy = False
+            self.btn_check.set_sensitive(True)
+            cur = installed_version()
+            if not res.get('ok'):
+                self.update_lbl.set_markup('<span foreground="#c0392b" size="small">检查失败：%s</span>'
+                                           % GLib.markup_escape_text(res.get('error') or '未知错误'))
+                if not silent:
+                    dlg = Gtk.MessageDialog(transient_for=self, modal=True,
+                                            message_type=Gtk.MessageType.WARNING,
+                                            buttons=Gtk.ButtonsType.CLOSE,
+                                            text='无法检查更新')
+                    dlg.format_secondary_text((res.get('error') or '') +
+                                              ('\n\n可以在「更新设置」里填写 GitHub 访问令牌或自定义更新源。'
+                                               if res.get('need_token') else ''))
+                    dlg.run(); dlg.destroy()
+                return False
+            latest = res['latest']
+            cache_write(latest)
+            if _ver_tuple(latest) > _ver_tuple(cur):
+                self.update_lbl.set_markup('<span foreground="#2b7de1" size="small">发现新版本 %s</span>' % latest)
+                self._update_info = res
+                self.show_update_banner(latest)
+            else:
+                self.update_lbl.set_markup('<span foreground="#2ecc71" size="small">已是最新版本</span>')
+                if not silent:
+                    self.status.set_markup('<span foreground="#2ecc71" size="small">已是最新版本 v%s</span>' % cur)
+            return False
+
+        def show_update_banner(self, latest):
+            self.banner_lbl.set_markup(
+                '<b>发现新版本 %s</b> <span foreground="#8b8b8b" size="small">当前 v%s</span>'
+                % (GLib.markup_escape_text(latest), installed_version()))
+            self.banner.set_reveal_child(True)
+
+        def open_update_settings(self):
+            cfg = load_update_cfg()
+            dlg = Gtk.Dialog(title='更新设置', transient_for=self, modal=True)
+            dlg.add_button('取消', Gtk.ResponseType.CANCEL)
+            dlg.add_button('保存', Gtk.ResponseType.OK)
+            area = dlg.get_content_area()
+            area.set_spacing(8)
+            area.set_margin_start(16); area.set_margin_end(16)
+            area.set_margin_top(12); area.set_margin_bottom(6)
+            grid = Gtk.Grid(column_spacing=10, row_spacing=8)
+            area.pack_start(grid, False, False, 0)
+
+            def row(r, text, w, tip=''):
+                lb = Gtk.Label(label=text); lb.set_xalign(0)
+                if tip:
+                    lb.set_tooltip_text(tip)
+                grid.attach(lb, 0, r, 1, 1)
+                w.set_hexpand(True); w.set_width_chars(34)
+                grid.attach(w, 1, r, 1, 1)
+
+            e_repo = Gtk.Entry(); e_repo.set_text(cfg.get('repo') or DEFAULT_REPO)
+            row(0, 'GitHub 仓库', e_repo, 'owner/repo，私有仓库请同时填写令牌')
+            e_token = Gtk.Entry(); e_token.set_text(cfg.get('token') or '')
+            e_token.set_visibility(False)
+            e_token.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+            row(1, '访问令牌', e_token, 'Personal Access Token，仅保存在本机 ~/.config/desktop-widgets/update.json（600 权限）')
+            e_feed = Gtk.Entry(); e_feed.set_text(cfg.get('feed') or '')
+            row(2, '自定义更新源', e_feed, '可选：返回 {"version":"x.y.z","deb":"下载地址"} 的 JSON 地址')
+            hint = Gtk.Label()
+            hint.set_markup('<span foreground="#8b8b8b" size="small">'
+                            '留空令牌时会尝试匿名访问；私有仓库被拒时在此填入令牌即可。</span>')
+            hint.set_xalign(0)
+            area.pack_start(hint, False, False, 0)
+            dlg.show_all()
+            if dlg.run() == Gtk.ResponseType.OK:
+                save_update_cfg({'repo': e_repo.get_text().strip() or DEFAULT_REPO,
+                                 'token': e_token.get_text().strip(),
+                                 'feed': e_feed.get_text().strip()})
+                self._check_update(silent=True)
+            dlg.destroy()
+
+        def do_update(self):
+            info = self._update_info
+            if not info:
+                self.check_update_clicked()
+                return
+            url = info.get('url') or ''
+            if not url:
+                dlg = Gtk.MessageDialog(transient_for=self, modal=True,
+                                        message_type=Gtk.MessageType.WARNING,
+                                        buttons=Gtk.ButtonsType.CLOSE,
+                                        text='没有可下载的安装包')
+                dlg.format_secondary_text('发行版中未找到 .deb 资源，请手动下载安装。')
+                dlg.run(); dlg.destroy()
+                return
+            if not shutil.which('pkexec'):
+                dlg = Gtk.MessageDialog(transient_for=self, modal=True,
+                                        message_type=Gtk.MessageType.INFO,
+                                        buttons=Gtk.ButtonsType.CLOSE,
+                                        text='缺少 pkexec，无法自动安装')
+                dlg.format_secondary_text('请手动下载后执行：\n'
+                                          'sudo deepin-immutable-ctl admin exec -- dpkg -i 包.deb')
+                dlg.run(); dlg.destroy()
+                return
+
+            token = load_update_cfg().get('token', '')
+            dest = os.path.join('/tmp', '%s_%s_all.deb' % (PKG_NAME, info['latest']))
+            self.btn_update.set_sensitive(False)
+            self.banner_lbl.set_markup('<b>正在下载 %s…</b>' % GLib.markup_escape_text(info['latest']))
+
+            def progress(got, total):
+                pct = int(got * 100 / max(total, 1))
+                GLib.idle_add(self._set_banner,
+                              '<b>正在下载 %s…</b> <span foreground="#8b8b8b" size="small">%d%%</span>'
+                              % (GLib.markup_escape_text(info['latest']), pct))
+
+            def worker():
+                try:
+                    download(url, token, dest, progress)
+                    GLib.idle_add(self._set_banner, '<b>正在安装，请输入管理员密码…</b>')
+                    r = subprocess.run(['pkexec', SELF, '--install-deb', dest])
+                    GLib.idle_add(self._after_update, r.returncode, info['latest'], dest)
+                except Exception as e:
+                    GLib.idle_add(self._update_failed, str(e))
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def _set_banner(self, markup):
+            self.banner_lbl.set_markup(markup)
+            return False
+
+        def _update_failed(self, msg):
+            self.btn_update.set_sensitive(True)
+            self.banner_lbl.set_markup('<b>更新失败</b>')
+            dlg = Gtk.MessageDialog(transient_for=self, modal=True,
+                                    message_type=Gtk.MessageType.ERROR,
+                                    buttons=Gtk.ButtonsType.CLOSE, text='更新失败')
+            dlg.format_secondary_text(msg)
+            dlg.run(); dlg.destroy()
+            return False
+
+        def _after_update(self, code, latest, dest):
+            self.btn_update.set_sensitive(True)
+            if code != 0:
+                return self._update_failed('安装返回码 %s（已取消或权限不足）' % code)
+            self.status.set_markup('<span foreground="#2ecc71" size="small">已更新到 v%s</span>' % latest)
+            self.banner_lbl.set_markup('<b>已更新到 v%s</b>' % latest)
+            restart_supervisor()
+            dlg = Gtk.MessageDialog(transient_for=self, modal=True,
+                                    message_type=Gtk.MessageType.INFO,
+                                    buttons=Gtk.ButtonsType.NONE,
+                                    text='更新完成：v%s' % latest)
+            dlg.format_secondary_text('挂件守护已重启。\n建议重启控制中心以加载新界面。')
+            dlg.add_button('稍后', Gtk.ResponseType.CLOSE)
+            dlg.add_button('立即重启', Gtk.ResponseType.OK)
+            if dlg.run() == Gtk.ResponseType.OK:
+                dlg.destroy()
+                os.execv(SELF, [SELF])
+            dlg.destroy()
+            return False
+
+        def show_about(self):
+            dlg = Gtk.AboutDialog(transient_for=self, modal=True)
+            dlg.set_program_name('桌面挂件控制中心')
+            dlg.set_version(VERSION)
+            dlg.set_comments('统一管理全部桌面挂件：启用开关、重启、独立设置、开机自启、一键全部启停。\n'
+                             '含自愈守护，挂件异常退出会自动拉起。')
+            dlg.set_license_type(Gtk.License.MIT_X11)
+            if ICON:
+                try:
+                    dlg.set_icon_from_file(ICON)
+                    dlg.set_logo(GdkPixbuf_from_file(ICON))
+                except Exception:
+                    pass
+            dlg.run(); dlg.destroy()
+
+    # ── 托盘 ──
+    tray_state = {'ind': None, 'status_icon': None}
+
+    def build_tray_menu(app, win):
+        menu = Gtk.Menu()
+
+        def item(text, cb):
+            it = Gtk.MenuItem(label=text)
+            it.connect('activate', lambda *_a: cb())
+            menu.append(it)
+            return it
+
+        item('打开控制中心', lambda: (win.show_all(), win.present()))
+        menu.append(Gtk.SeparatorMenuItem())
+        item('全部启动', lambda: win.all_start(None))
+        item('全部停止', lambda: win.all_stop(None))
+        item('重启守护', lambda: win.restart_daemon(None))
+        menu.append(Gtk.SeparatorMenuItem())
+        auto_it = Gtk.CheckMenuItem(label='开机自启')
+        auto_it.set_active(autostart_enabled())
+
+        def toggle_auto(it):
+            set_autostart(it.get_active())
+            if win:
+                win._updating_autostart = True
+                win.autostart_switch.set_active(it.get_active())
+                win._updating_autostart = False
+
+        auto_it.connect('toggled', toggle_auto)
+        menu.append(auto_it)
+        item('检查更新…', lambda: (win.show_all(), win.present(), win.check_update_clicked()))
+        menu.append(Gtk.SeparatorMenuItem())
+        item('退出', lambda: app.quit())
+        menu.show_all()
+        tray_state['menu'] = menu
+        tray_state['auto_item'] = auto_it
+        return menu
+
+    def setup_tray(app, win):
+        menu = build_tray_menu(app, win)
+        # 优先 Ayatana AppIndicator（Deepin/DDE 托盘原生支持）
+        try:
+            gi.require_version('AyatanaAppIndicator3', '0.1')
+            from gi.repository import AyatanaAppIndicator3 as AppIndicator3
+        except Exception:
+            try:
+                gi.require_version('AppIndicator3', '0.1')
+                from gi.repository import AppIndicator3
+            except Exception:
+                AppIndicator3 = None
+        if AppIndicator3 is not None and ICON:
+            try:
+                ind = AppIndicator3.Indicator.new(
+                    APP_ID, ICON, AppIndicator3.IndicatorCategory.APPLICATION_STATUS)
+                ind.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+                ind.set_title('桌面挂件控制中心')
+                ind.set_menu(menu)
+                try:
+                    ind.set_secondary_activate_target(menu)
+                except Exception:
+                    pass
+                tray_state['ind'] = ind
+                return True
+            except Exception as e:
+                print('appindicator failed: %s' % e, file=sys.stderr)
+        # 回退：老式 XEmbed 托盘
+        try:
+            si = Gtk.StatusIcon()
+            if ICON:
+                si.set_from_file(ICON)
+            else:
+                si.set_from_icon_name('preferences-system')
+            si.set_tooltip_text('桌面挂件控制中心')
+            si.connect('activate', lambda *_a: (win.show_all(), win.present()))
+            si.connect('popup-menu', lambda _i, btn, t: menu.popup(
+                None, None, Gtk.StatusIcon.position_menu, _i, btn, t))
+            si.set_visible(True)
+            tray_state['status_icon'] = si
+            return True
+        except Exception as e:
+            print('tray unavailable: %s' % e, file=sys.stderr)
+            return False
+
+    from gi.repository import GdkPixbuf as _GdkPixbuf
+
+    def GdkPixbuf_from_file(path):
+        return _GdkPixbuf.Pixbuf.new_from_file(path)
+
+    class HubApp(Gtk.Application):
+        def __init__(self):
+            super().__init__(application_id=APP_ID,
+                             flags=Gio.ApplicationFlags.FLAGS_NONE)
+            self.win = None
+            self.tray_ok = False
+
+        def do_startup(self):
+            Gtk.Application.do_startup(self)
+
+        def do_activate(self):
+            if self.win is None:
+                self.win = HubWindow(self)
+                self.win.show_all()
+                self.win.banner.set_reveal_child(False)
+                self.win.resize(600, 760)
+                self.tray_ok = setup_tray(self, self.win)
+            else:
+                self.win.show_all()
+                self.win.present()
+                if getattr(self.win, 'tray_ok_hint_shown', False) is False and not self.tray_ok:
+                    self.win.tray_ok_hint_shown = True
+
+    # 保持进程存活（窗口隐藏后托盘仍在）
+    app = HubApp()
+    app.run(None)
 
 
 def main():
-    win = HubWindow()
-    win.connect('destroy', Gtk.main_quit)
-    win.show_all()
-    Gtk.main()
+    argv = sys.argv[1:]
+    if '--version' in argv:
+        print('desktop-widgets-hub %s' % VERSION)
+        return 0
+    if '--install-deb' in argv:
+        i = argv.index('--install-deb')
+        if i + 1 >= len(argv):
+            print('用法: desktop-widgets-hub --install-deb <包.deb>', file=sys.stderr)
+            return 2
+        return install_deb_root(argv[i + 1])
+    if '--check-update-cli' in argv:
+        res = check_update()
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0 if res.get('ok') else 1
+    run_app()
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
