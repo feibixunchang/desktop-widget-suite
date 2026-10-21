@@ -6,3 +6,4 @@ publish/
 stage/
 *.pdb
 WidgetHubSetup-*.exe
+payload.zip

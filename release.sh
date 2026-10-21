@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # ==========================================================
-#  桌面挂件合集 · 一键发布
+#  桌面挂件合集（Windows 线）· 一键发布
 #  用法:  export GITHUB_TOKEN=你的PAT
-#         bash release.sh 1.1
-#  流程: 改版本号 → 构建 → 提交 → 推送 → 打 tag → 发 GitHub Release（带安装包）
+#         bash release.sh 1.2
+#  流程: 改版本号 → 构建 → 提交 → 推送 windows-suite → 打 win-v<版本> tag → 发 Release（带安装包）
+#
+#  ⚠️ tag 必须带 win- 前缀：同一个仓库的 main 上是 Linux 版（tag 形如 2.9.80），
+#     管理器的检查更新按 win- 前缀过滤，不带前缀的 tag 会被当成别的平台而忽略。
 # ==========================================================
 set -e
 
 VER="${1:-}"
-if [ -z "$VER" ]; then echo "用法: bash release.sh <版本号，例如 1.1>"; exit 1; fi
+if [ -z "$VER" ]; then echo "用法: bash release.sh <版本号，例如 1.2>"; exit 1; fi
 if [ -z "$GITHUB_TOKEN" ]; then echo "请先设置 GITHUB_TOKEN 环境变量"; exit 1; fi
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -16,7 +19,9 @@ cd "$HERE"
 DOTNET="/c/Program Files/dotnet/dotnet.exe"
 REPO_OWNER="feibixunchang"
 REPO_NAME="desktop-widget-suite"
-TAG="v$VER"
+# Windows 线只推 windows-suite 分支：main 被 Linux 版占着，不要往上推
+WIN_BRANCH="windows-suite"
+TAG="win-v$VER"
 
 echo "==> 1/6 更新版本号 -> $TAG"
 "$DOTNET" --version >/dev/null
@@ -54,12 +59,12 @@ echo "    挂件来源: $PROGRAMS_DIR"
 "$DOTNET" publish installer/WidgetHubSetup/WidgetHubSetup.csproj -c Release -o installer/WidgetHubSetup/out -v quiet --nologo
 cp -f installer/WidgetHubSetup/out/WidgetHubSetup.exe ./WidgetHubSetup-$TAG.exe
 
-echo "==> 5/6 提交并推送"
+echo "==> 5/6 提交并推送到 $WIN_BRANCH"
 git add -A
 git commit -m "release: $TAG" || echo "   (没有变更，跳过提交)"
 git tag -f "$TAG" >/dev/null 2>&1 || true
-git push origin HEAD
-git push origin "$TAG" --force
+git push origin "HEAD:refs/heads/$WIN_BRANCH"
+git push origin "refs/tags/$TAG" --force
 
 echo "==> 6/6 创建 GitHub Release"
 ASSET_NAME="WidgetHubSetup.exe"
@@ -69,7 +74,7 @@ if [ -f RELEASE_NOTES.md ]; then
   BODY="$(cat RELEASE_NOTES.md)
 
 ---
-* 10 个桌面挂件 + 统一托盘图标
+* 12 个桌面挂件 + 统一托盘图标
 * 目标电脑无需安装任何 .NET 运行时
 * 安装包：$ASSET_NAME（约 $(du -m "WidgetHubSetup-$TAG.exe" | cut -f1)MB）
 
@@ -78,7 +83,7 @@ else
 BODY=$(cat << EOF
 桌面挂件合集 WidgetHub $TAG
 
-* 10 个桌面挂件 + 统一托盘图标
+* 12 个桌面挂件 + 统一托盘图标
 * 目标电脑无需安装任何 .NET 运行时
 * 安装包：$ASSET_NAME（约 $(du -m "WidgetHubSetup-$TAG.exe" | cut -f1)MB）
 
@@ -86,21 +91,46 @@ BODY=$(cat << EOF
 EOF
 )
 fi
-curl -s -X POST "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases" \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  -H "Accept: application/vnd.github+json" \
-  -H "User-Agent: WidgetHub-Release" \
-  -H "Content-Type: application/json; charset=utf-8" \
-  --data-binary @<(python -c "
+API="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME"
+AUTH=(-H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" -H "User-Agent: WidgetHub-Release")
+
+# 幂等：Release 已存在就复用（重跑不会 422），顺便把正文刷成最新的 RELEASE_NOTES.md
+REL_ID=$(curl -s "$API/releases/tags/$TAG" "${AUTH[@]}" \
+  | python -c "import json,sys; d=json.load(sys.stdin); print(d.get('id') or '')")
+if [ -n "$REL_ID" ]; then
+  echo "    Release $TAG 已存在（id=$REL_ID），更新正文并复用"
+  curl -s -X PATCH "$API/releases/$REL_ID" "${AUTH[@]}" \
+    -H "Content-Type: application/json; charset=utf-8" \
+    --data-binary @<(python -c "
+import json,sys
+print(json.dumps({'name':'桌面挂件合集 $TAG','body':sys.stdin.read(),'draft':False,'prerelease':False},ensure_ascii=False))
+" <<< "$BODY") > /dev/null
+else
+  curl -s -X POST "$API/releases" "${AUTH[@]}" \
+    -H "Content-Type: application/json; charset=utf-8" \
+    --data-binary @<(python -c "
 import json,sys
 print(json.dumps({'tag_name':'$TAG','name':'桌面挂件合集 $TAG','body':sys.stdin.read(),'draft':False,'prerelease':False},ensure_ascii=False))
 " <<< "$BODY") > /dev/null
+fi
 
-UPLOAD_URL=$(curl -s "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/tags/$TAG" \
-  -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" -H "User-Agent: WidgetHub-Release" \
+UPLOAD_URL=$(curl -s "$API/releases/tags/$TAG" "${AUTH[@]}" \
   | python -c "import json,sys; d=json.load(sys.stdin); print(d.get('upload_url',''))")
 UPLOAD_URL=${UPLOAD_URL%%\?*}
 if [ -n "$UPLOAD_URL" ]; then
+  # 同名附件已存在先删掉，否则上传会 422
+  OLD_ID=$(curl -s "$API/releases/tags/$TAG/assets" "${AUTH[@]}" \
+    | python -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: d=[]
+for a in (d if isinstance(d,list) else []):
+    if a.get('name')=='$ASSET_NAME': print(a.get('id') or '')
+")
+  if [ -n "$OLD_ID" ]; then
+    curl -s -X DELETE "$API/releases/assets/$OLD_ID" "${AUTH[@]}" > /dev/null
+    echo "    已删除旧附件（id=$OLD_ID）"
+  fi
   curl -s -X POST "$UPLOAD_URL?name=$ASSET_NAME" \
     -H "Authorization: token $GITHUB_TOKEN" \
     -H "Content-Type: application/octet-stream" \

@@ -53,13 +53,19 @@ namespace WidgetHub
     /// <summary>版本与更新源信息。</summary>
     public static class AppInfo
     {
-        public const string Version = "1.1";
+        public const string Version = "1.2";
         public const string DisplayName = "桌面挂件合集";
         public const string RepoOwner = "feibixunchang";
         // GitHub 不允许仓库名带中文（会被剥成空），所以仓库用 ASCII 名，中文名放在描述/README
         public const string RepoName = "desktop-widget-suite";
-        public const string ReleaseApi =
-            "https://api.github.com/repos/" + RepoOwner + "/" + RepoName + "/releases/latest";
+        /// <summary>Windows 线的 Release tag 前缀，例如 win-v1.2。
+        /// 同一个仓库里还躺着 Linux 版的 tag（2.9.80 等），所以更新检测必须按这个前缀过滤，
+        /// 否则会把 Linux 的 .deb 当成 Windows 的新版本推给用户。</summary>
+        public const string TagPrefix = "win-";
+        /// <summary>列全部 Release（自己按 tag 前缀挑 Windows 线的最新版）。
+        /// 不能用 releases/latest：它返回的是"最近一次发布"，Linux 线一发新版就把 Windows 顶掉了。</summary>
+        public const string ReleasesApi =
+            "https://api.github.com/repos/" + RepoOwner + "/" + RepoName + "/releases?per_page=100";
         public const string RepoUrl = "https://github.com/" + RepoOwner + "/" + RepoName;
         public const string AssetName = "WidgetHubSetup.exe";
     }
@@ -86,6 +92,23 @@ namespace WidgetHub
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             return Path.Combine(local, "Programs", Folder, ExeName);
+        }
+
+        /// <summary>
+        /// 挂件的"身份证"：Folder 可能是 "WidgetHubSuite\Skins\DesktopCalendar"（安装器写的），
+        /// 也可能是裸名 "DesktopCalendar"（Defaults() 写的）。这里统一取最后一段，
+        /// 老配置合并、设置项映射、位置记忆都按它比，才不会把同一个挂件认成两个。
+        /// </summary>
+        public string Id
+        {
+            get
+            {
+                var f = Folder ?? "";
+                int i = Math.Max(f.LastIndexOf('\\'), f.LastIndexOf('/'));
+                if (i >= 0) f = f.Substring(i + 1);
+                if (string.IsNullOrEmpty(f)) f = Path.GetFileNameWithoutExtension(ExeName ?? "");
+                return f;
+            }
         }
     }
 
@@ -190,13 +213,15 @@ namespace WidgetHub
             string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string exe = s.ExeName ?? "";
 
-            // 5 个共用 Shared/WidgetForm 的挂件：同一套 schema
-            string[] shared = { "DesktopCalendar", "DesktopTimer", "DesktopVideo", "DesktopWallet", "RssWidget" };
-            if (Array.IndexOf(shared, s.Folder) >= 0 || shared.Any(x => exe.StartsWith(x, StringComparison.OrdinalIgnoreCase)))
+            // 共用 Shared/WidgetForm 的挂件：同一套 schema。
+            // 按 Id（Folder 最后一段）比，老配置的 Folder 带 WidgetHubSuite\Skins\ 前缀。
+            string[] shared = { "DesktopCalendar", "DesktopTimer", "DesktopVideo", "DesktopWallet", "RssWidget", "DesktopNotes", "DesktopPhoto" };
+            if (Array.IndexOf(shared, s.Id) >= 0 || shared.Any(x => exe.StartsWith(x, StringComparison.OrdinalIgnoreCase)))
             {
                 return new Profile
                 {
-                    ConfigPath = Path.Combine(app, s.Folder, "settings.json"),
+                    // 挂件把自己的 settings.json 放在 %AppData%\<挂件名>\ 下（见 Shared.AppPaths）
+                    ConfigPath = Path.Combine(app, s.Id, "settings.json"),
                     Defs = new List<SettingDef>
                     {
                         Num("FontSize", "字号", 8, 48),
@@ -423,43 +448,81 @@ namespace WidgetHub
     /// <summary>从 GitHub Releases 检查新版本并下载安装包。</summary>
     public static class UpdateService
     {
+        /// <summary>
+        /// 取 Windows 线最新的一个 Release。
+        /// 仓库里同时存在 Linux 版（tag 形如 2.9.80）和 Windows 版（tag 形如 win-v1.2）的发布，
+        /// 所以这里列出全部 Release 后按 <see cref="AppInfo.TagPrefix"/> 过滤，取版本号最大的那个。
+        /// 返回 null = 网络/接口失败；返回 TagVersion 为空 = 接口正常但还没有 Windows 版发布记录。
+        /// </summary>
         public static async Task<UpdateInfo?> CheckAsync(string token)
         {
             try
             {
                 using var client = NewClient();
-                using var req = new HttpRequestMessage(HttpMethod.Get, AppInfo.ReleaseApi);
+                using var req = new HttpRequestMessage(HttpMethod.Get, AppInfo.ReleasesApi);
                 if (!string.IsNullOrWhiteSpace(token))
                     req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("token", token.Trim());
                 using var resp = await client.SendAsync(req).ConfigureAwait(false);
                 string body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
                 if (!resp.IsSuccessStatusCode) return null;
 
-                var node = System.Text.Json.Nodes.JsonNode.Parse(body) as System.Text.Json.Nodes.JsonObject;
-                if (node == null) return null;
-                var info = new UpdateInfo
+                var arr = System.Text.Json.Nodes.JsonNode.Parse(body) as System.Text.Json.Nodes.JsonArray;
+                if (arr == null) return null;
+
+                UpdateInfo? best = null;
+                Version? bestVer = null;
+                foreach (var item in arr)
                 {
-                    TagVersion = node["tag_name"]?.ToString().TrimStart('v', 'V') ?? "",
-                    HtmlUrl = node["html_url"]?.ToString() ?? AppInfo.RepoUrl
-                };
-                if (node["assets"] is System.Text.Json.Nodes.JsonArray assets)
-                {
-                    foreach (var a in assets)
+                    var node = item as System.Text.Json.Nodes.JsonObject;
+                    if (node == null) continue;
+                    // 草稿和预发布不算"已发布"
+                    if (Flag(node, "draft")) continue;
+                    if (Flag(node, "prerelease")) continue;
+
+                    string tag = node["tag_name"]?.ToString() ?? "";
+                    // 只认 Windows 线的 win- 前缀，Linux 的 2.9.80 在这一步就被挡掉
+                    if (tag.Length <= AppInfo.TagPrefix.Length) continue;
+                    if (!tag.StartsWith(AppInfo.TagPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+                    string ver = tag.Substring(AppInfo.TagPrefix.Length).TrimStart('v', 'V');
+                    if (!Version.TryParse(Normalize(ver), out var v)) continue;
+
+                    var info = new UpdateInfo
                     {
-                        if (a == null) continue;
-                        string name = a["name"]?.ToString() ?? "";
-                        if (string.Equals(name, AppInfo.AssetName, StringComparison.OrdinalIgnoreCase))
+                        TagVersion = ver,
+                        HtmlUrl = node["html_url"]?.ToString() ?? AppInfo.RepoUrl
+                    };
+                    if (node["assets"] is System.Text.Json.Nodes.JsonArray assets)
+                    {
+                        foreach (var a in assets)
                         {
-                            info.AssetName = name;
-                            info.AssetUrl = a["browser_download_url"]?.ToString() ?? "";
-                            if (a["id"] != null && long.TryParse(a["id"]!.ToString(), out long aid)) info.AssetId = aid;
-                            break;
+                            if (a == null) continue;
+                            string name = a["name"]?.ToString() ?? "";
+                            if (string.Equals(name, AppInfo.AssetName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                info.AssetName = name;
+                                info.AssetUrl = a["browser_download_url"]?.ToString() ?? "";
+                                if (a["id"] != null && long.TryParse(a["id"]!.ToString(), out long aid)) info.AssetId = aid;
+                                break;
+                            }
                         }
                     }
+                    // 没有安装包附件的版本没法升级，跳过
+                    if (info.AssetId <= 0) continue;
+                    if (bestVer != null && v <= bestVer) continue;
+                    best = info;
+                    bestVer = v;
                 }
-                return info;
+                return best ?? new UpdateInfo();
             }
             catch { return null; }
+        }
+
+        /// <summary>JSON 布尔字段：node.ToString() 对 true 返回 "True"，用忽略大小写比较最稳。</summary>
+        static bool Flag(System.Text.Json.Nodes.JsonObject o, string key)
+        {
+            var n = o[key];
+            if (n == null) return false;
+            return string.Equals(n.ToString(), "true", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>下载新版本安装包，返回本地路径。</summary>
@@ -534,7 +597,7 @@ namespace WidgetHub
     {
         public bool AutoStartManager { get; set; } = false;
         public string UpdateToken { get; set; } = "";      // 私有仓库的更新令牌（可选）
-        public bool HideWidgetTrayIcons { get; set; } = false;  // 旧版兜底，10 个挂件已从源码/IL 层去托盘，默认关闭
+        public bool HideWidgetTrayIcons { get; set; } = false;  // 旧版兜底，12 个挂件已从源码/IL 层去托盘，默认关闭
         public List<Skin> Skins { get; set; } = new();
 
         public static string Path_ =>
@@ -558,9 +621,25 @@ namespace WidgetHub
         public void Normalize()
         {
             if (Skins == null) Skins = Defaults().Skins;
+            // 后来新增的挂件要并进来，否则老用户 config.json 里永远只有旧的几个。
+            // 按 Id（Folder 最后一段）比，不能直接比 Folder：安装器写的是
+            // "WidgetHubSuite\Skins\Xxx"，Defaults() 写的是裸名，直接比永远不相等，
+            // 会把整套默认列表重复追加一遍（界面上出现两行同名挂件）。
+            foreach (var want in Defaults().Skins)
+            {
+                bool has = false;
+                foreach (var s in Skins)
+                {
+                    if (string.Equals(s.Id, want.Id, StringComparison.OrdinalIgnoreCase)) { has = true; break; }
+                    if (string.Equals(Path.GetFileNameWithoutExtension(s.ExeName ?? ""),
+                                      Path.GetFileNameWithoutExtension(want.ExeName ?? ""),
+                                      StringComparison.OrdinalIgnoreCase)) { has = true; break; }
+                }
+                if (!has) Skins.Add(want);
+            }
             foreach (var s in Skins)
             {
-                if (string.Equals(s.Folder, "NeonMouseTrail", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(s.Id, "NeonMouseTrail", StringComparison.OrdinalIgnoreCase))
                     s.Positionless = true;
                 if (s.X >= 0 && s.Y >= 0 && !s.PositionSaved) s.PositionSaved = true; // 老配置里存过坐标的视为已记录
             }
@@ -580,16 +659,20 @@ namespace WidgetHub
         {
             var skins = new List<Skin>
             {
-                new() { Name = "小普河天气",     Folder = "XiaoPuHeWeather", ExeName = "XiaoPuHeWeather.exe" },
-                new() { Name = "桌面万年历",     Folder = "DesktopCalendar", ExeName = "DesktopCalendar.exe" },
-                new() { Name = "天气CPU网速",    Folder = "DesktopMonitor",  ExeName = "DesktopMonitor.exe" },
-                new() { Name = "桌面音乐",       Folder = "DesktopMusic",    ExeName = "DesktopMusic.exe" },
-                new() { Name = "桌面收音机",     Folder = "DesktopRadio",    ExeName = "DesktopRadio.exe" },
-                new() { Name = "倒计时闹钟",     Folder = "DesktopTimer",    ExeName = "DesktopTimer.exe" },
-                new() { Name = "桌面视频",       Folder = "DesktopVideo",    ExeName = "DesktopVideo.exe" },
-                new() { Name = "桌面记账",       Folder = "DesktopWallet",   ExeName = "DesktopWallet.exe" },
-                new() { Name = "桌面RSS",        Folder = "RssWidget",       ExeName = "RssWidget.exe" },
-                new() { Name = "炫彩鼠标尾巴",   Folder = "NeonMouseTrail",  ExeName = "NeonMouseTrail.exe", Positionless = true },
+                // Folder 用相对 %LocalAppData%\Programs 的完整子路径，和安装器写进 config.json
+                // 的形式一致；否则配置文件丢了以后，管理器会去 Programs\桌面万年历\ 找 exe。
+                new() { Name = "小普河天气",     Folder = @"WidgetHubSuite\Skins\XiaoPuHeWeather", ExeName = "XiaoPuHeWeather.exe" },
+                new() { Name = "桌面万年历",     Folder = @"WidgetHubSuite\Skins\DesktopCalendar", ExeName = "DesktopCalendar.exe" },
+                new() { Name = "天气CPU网速",    Folder = @"WidgetHubSuite\Skins\DesktopMonitor",  ExeName = "DesktopMonitor.exe" },
+                new() { Name = "桌面音乐",       Folder = @"WidgetHubSuite\Skins\DesktopMusic",    ExeName = "DesktopMusic.exe" },
+                new() { Name = "桌面收音机",     Folder = @"WidgetHubSuite\Skins\DesktopRadio",    ExeName = "DesktopRadio.exe" },
+                new() { Name = "倒计时闹钟",     Folder = @"WidgetHubSuite\Skins\DesktopTimer",    ExeName = "DesktopTimer.exe" },
+                new() { Name = "桌面视频",       Folder = @"WidgetHubSuite\Skins\DesktopVideo",    ExeName = "DesktopVideo.exe" },
+                new() { Name = "桌面记账",       Folder = @"WidgetHubSuite\Skins\DesktopWallet",   ExeName = "DesktopWallet.exe" },
+                new() { Name = "桌面RSS",        Folder = @"WidgetHubSuite\Skins\RssWidget",       ExeName = "RssWidget.exe" },
+                new() { Name = "桌面记事",       Folder = @"WidgetHubSuite\Skins\DesktopNotes",    ExeName = "DesktopNotes.exe" },
+                new() { Name = "桌面相框",       Folder = @"WidgetHubSuite\Skins\DesktopPhoto",    ExeName = "DesktopPhoto.exe" },
+                new() { Name = "炫彩鼠标尾巴",   Folder = @"WidgetHubSuite\Skins\NeonMouseTrail",  ExeName = "NeonMouseTrail.exe", Positionless = true },
             };
             return new Config { Skins = skins };
         }
@@ -623,6 +706,16 @@ namespace WidgetHub
         [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
         [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
         [DllImport("user32.dll")] public static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint crKey, byte bAlpha, uint dwFlags);
+        [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        public const int SW_SHOWMINNOACTIVE = 7;   // 最小化且不抢焦点
+
+        /// <summary>把窗口最小化（不激活别的窗口）。</summary>
+        public static void MinimizeWindow(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero) return;
+            try { ShowWindow(hWnd, SW_SHOWMINNOACTIVE); } catch { }
+        }
+
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
         [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
@@ -886,6 +979,7 @@ namespace WidgetHub
                 s.Process = existing;
                 var h0 = Win32.FindMainWindow((uint)existing.Id);
                 if (h0 != IntPtr.Zero) Win32.ApplyLayout(s, h0);
+                MinimizeIfTrail(s, existing.Id);
                 int epid = existing.Id;
                 Task.Run(() => ReapplyLoop(s, epid));
                 return existing;
@@ -909,6 +1003,7 @@ namespace WidgetHub
                 {
                     Log.W($"Start {s.Name} 第{i}次找到窗口 hwnd={hwnd}");
                     Win32.ApplyLayout(s, hwnd);
+                    MinimizeIfTrail(s, p.Id);
                     break;
                 }
                 if (i == 29) Log.W($"Start {s.Name} 30 次仍未找到窗口");
@@ -919,6 +1014,32 @@ namespace WidgetHub
             int pid = p.Id;
             Task.Run(() => ReapplyLoop(s, pid));
             return p;
+        }
+
+        // 鼠标拖尾（NeonMouseTrail）的设置窗口每次启动都自己弹出来，而它的托盘图标
+        // 早先被去掉了（用户要求"托盘只有一个图标"），用户既没法从托盘收起它，
+        // 也只能看着它在任务栏占一格。这里一找到它的窗口就最小化。
+        // 改完特效设置会重启它，同样走这里，所以改设置也不会再弹出来。
+        private static void MinimizeIfTrail(Skin s, int pid)
+        {
+            try
+            {
+                if (s.ExeName == null) return;
+                if (s.ExeName.IndexOf("NeonMouseTrail", StringComparison.OrdinalIgnoreCase) < 0) return;
+                var h = Win32.FindMainWindow((uint)pid);
+                if (h != IntPtr.Zero) Win32.MinimizeWindow(h);
+                // 有些程序会把窗口重新 Show 出来，稍后再补一次
+                Task.Delay(1500).ContinueWith(_ =>
+                {
+                    try
+                    {
+                        var h2 = Win32.FindMainWindow((uint)pid);
+                        if (h2 != IntPtr.Zero && Win32.IsIconic(h2) == false) Win32.MinimizeWindow(h2);
+                    }
+                    catch { }
+                });
+            }
+            catch { }
         }
 
         // 挂件启动后会自己"恢复上次位置"（常常是 0,0），会把我们的定位覆盖掉。
@@ -1058,7 +1179,7 @@ namespace WidgetHub
                 latest = info;
                 if (string.IsNullOrEmpty(info.TagVersion))
                 {
-                    lblState.Text = "仓库里还没有发布版本。";
+                    lblState.Text = "仓库里还没有 Windows 版发布记录（tag 需带 win- 前缀）。";
                     btnInstall.Enabled = false;
                     return;
                 }
@@ -1400,7 +1521,7 @@ namespace WidgetHub
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Microsoft YaHei", 10F);
-            Width = 1080; Height = 660;
+            Width = 1080; Height = 740;
             MinimumSize = new Size(880, 520);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.Sizable;
@@ -1584,7 +1705,7 @@ namespace WidgetHub
             RefreshGrid();
             ClearHighlight();   // 默认不选中任何行，否则首行/首列表头会被系统高亮色冲淡
             // 句柄创建后 DataGridView 会自动把首行设为当前行并选中，这里在显示时再清一次
-            Shown += (_, _) => ClearHighlight();
+            Shown += (_, _) => { ClearHighlight(); FitHeightToGrid(); };
         }
 
         // 彻底清掉高亮：ClearSelection 只清"选中"，CurrentCell 仍在，
@@ -1676,6 +1797,68 @@ namespace WidgetHub
                 grid.Rows[i].Tag = s;
             }
             silent = false;
+            // 挂件数量变了（新增/合并去重）要重新适应高度，否则 150% DPI 下行高被撑大，
+            // 12 个挂件里有几行落在窗口外面，只能靠滚动条才看得见。
+            // 行高要等布局跑完才测得准，所以延一拍再算。
+            if (IsHandleCreated && grid.Rows.Count != _fitRows)
+            {
+                try { BeginInvoke(new Action(FitHeightToGrid)); } catch { FitHeightToGrid(); }
+            }
+        }
+
+        private int _fitRows = -1;
+
+        /// <summary>
+        /// 让窗口高度刚好容纳所有行。只在行数变化时调整：
+        /// 用户手动拖大/拖小的窗口不会被反复改回去。
+        ///
+        /// 行高必须按 DataGridViewRow.Height 实测求和，并且要乘上 DPI 缩放系数：
+        /// AutoScaleMode.Dpi 会把表格的字号和行高按 DPI 放大（150% 下 40 的设计行高
+        /// 实际渲染成 60），而窗体 Height 是物理像素、顶栏/工具栏却还是设计值，
+        /// 不乘系数就算出来永远差一截，底下几行只能靠滚动条看。
+        /// </summary>
+        private void FitHeightToGrid()
+        {
+            try
+            {
+                if (grid == null || grid.Rows.Count == 0) return;
+                int rowsHeight = 0;
+                foreach (DataGridViewRow row in grid.Rows) rowsHeight += row.Height;
+
+                // DeviceDpi 有时还是设计时的 96（在 SetProcessDPIAware 之前缓存的），
+                // 用窗体 DC 实测一次才准；取两者最大，宁大不小。
+                float k = 1f;
+                try { using (var g = CreateGraphics()) k = Math.Max(k, g.DpiX / 96f); } catch { }
+                try { using (var g = grid.CreateGraphics()) k = Math.Max(k, g.DpiX / 96f); } catch { }
+                k = Math.Max(k, DeviceDpi / 96f);
+                // chrome 用 Height-grid.Height 实测，比真实渲染的顶栏+工具栏少十几像素，
+                // 余量给足；宁可高一点也别卡掉最后一行。
+                int need = (int)Math.Ceiling((grid.ColumnHeadersHeight + rowsHeight) * k) + 80;
+                int chrome = Height - grid.Height;      // 顶栏、工具栏、标题框等占的高度
+                int want = chrome + need;
+                var screen = Screen.PrimaryScreen.WorkingArea;
+                int max = Math.Max(MinimumSize.Height, screen.Height - 80);
+                int h = Math.Min(Math.Max(want, MinimumSize.Height), max);
+                Log.W($"FitHeight rows={grid.Rows.Count} rowsH={rowsHeight} k={k} chrome={chrome} want={want} cur={Height}");
+                if (Math.Abs(h - Height) > 2) Height = h;
+
+                // 兜底：DPI、滚动条、单元格内边距的零头算不死，直接看实际显示了几行，
+                // 少几行就补几行的高度，直到所有行都落进窗口。
+                // 注意 net48 的 DataGridView.DisplayedRowCount 是方法不是属性。
+                for (int i = 0; i < 12; i++)
+                {
+                    int shown;
+                    try { shown = grid.DisplayedRowCount(false); } catch { break; }
+                    int missing = grid.Rows.Count - shown;
+                    if (missing <= 0) break;
+                    int per = (int)Math.Ceiling((double)need / Math.Max(1, grid.Rows.Count));
+                    Height += missing * per + 16;
+                    if (Height >= max) break;
+                }
+
+                _fitRows = grid.Rows.Count;
+            }
+            catch { }
         }
 
         // 只刷新"状态"和"启动/停止"两列，不重建整张表，避免闪烁和选中丢失
