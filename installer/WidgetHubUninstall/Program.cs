@@ -12,11 +12,12 @@ namespace WidgetHubUninstall
     {
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WidgetHub";
 
-        // 会被一起结束的进程（管理程序 + 10 个挂件）
+        // 会被一起结束的进程（管理程序 + 12 个挂件）
         private static readonly string[] ProcessNames =
         {
             "WidgetHub", "XiaoPuHeWeather", "DesktopCalendar", "DesktopMonitor", "DesktopMusic",
-            "DesktopRadio", "DesktopTimer", "DesktopVideo", "DesktopWallet", "RssWidget", "NeonMouseTrail"
+            "DesktopRadio", "DesktopTimer", "DesktopVideo", "DesktopWallet", "RssWidget", "DesktopNotes",
+            "DesktopPhoto", "NeonMouseTrail"
         };
 
         [STAThread]
@@ -150,7 +151,7 @@ namespace WidgetHubUninstall
             var desc = new Label
             {
                 Text = "将删除以下内容：\r\n" +
-                       "· 安装目录（管理器 + 10 个挂件）\r\n" +
+                       "· 安装目录（管理器 + 12 个挂件）\r\n" +
                        "· 开始菜单与桌面快捷方式\r\n" +
                        "· 开机自启设置\r\n\r\n" +
                        "安装目录：" + dir,

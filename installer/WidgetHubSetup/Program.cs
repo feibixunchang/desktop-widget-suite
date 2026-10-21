@@ -58,6 +58,8 @@ namespace WidgetHubSetup
             new SkinDef { Name = "桌面视频", Sub = "DesktopVideo", Exe = "DesktopVideo.exe" },
             new SkinDef { Name = "桌面记账", Sub = "DesktopWallet", Exe = "DesktopWallet.exe" },
             new SkinDef { Name = "桌面RSS", Sub = "RssWidget", Exe = "RssWidget.exe" },
+            new SkinDef { Name = "桌面记事", Sub = "DesktopNotes", Exe = "DesktopNotes.exe" },
+            new SkinDef { Name = "桌面相框", Sub = "DesktopPhoto", Exe = "DesktopPhoto.exe" },
             new SkinDef { Name = "炫彩鼠标尾巴", Sub = "NeonMouseTrail", Exe = "NeonMouseTrail.exe", Positionless = true },
         };
     }
@@ -133,7 +135,7 @@ namespace WidgetHubSetup
                 using var f2 = new Font("Microsoft YaHei", 9F);
                 using var sb = new SolidBrush(Color.FromArgb(226, 236, 255));
                 g.DrawString("桌面挂件总管", f1, Brushes.White, PX(96), PX(24));
-                g.DrawString("WidgetHub · 10 个桌面挂件 + 一个统一托盘图标", f2, sb, PX(98), PX(62));
+                g.DrawString("WidgetHub · 12 个桌面挂件 + 一个统一托盘图标", f2, sb, PX(98), PX(62));
             };
 
             // ---------- 底部操作区（Dock=Bottom，永远贴在窗口底边）----------
@@ -174,7 +176,7 @@ namespace WidgetHubSetup
             };
             lblSub = new Label
             {
-                Text = "把 1 个管理程序 + 10 个挂件装到同一目录，并生成开始菜单快捷方式。无需安装任何运行库。",
+                Text = "把 1 个管理程序 + 12 个挂件装到同一目录，并生成开始菜单快捷方式。无需安装任何运行库。",
                 ForeColor = CMuted,
                 AutoSize = false,
                 Size = new Size(ContentWidth(), PX(40)),
@@ -297,7 +299,7 @@ namespace WidgetHubSetup
                         btnInstall.Text = "启动桌面挂件总管";
                         btnInstall.Enabled = true;
                         btnInstall.Fill = CBlueD;
-                        lblDetail.Text = "已安装 1 个管理程序 + 10 个挂件。托盘里只会出现 WidgetHub 一个图标。";
+                        lblDetail.Text = "已安装 1 个管理程序 + 12 个挂件。托盘里只会出现 WidgetHub 一个图标。";
                     }
                     else
                     {
