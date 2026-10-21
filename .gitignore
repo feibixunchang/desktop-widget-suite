@@ -7,3 +7,4 @@ stage/
 *.pdb
 WidgetHubSetup-*.exe
 payload.zip
+.relbody.tmp

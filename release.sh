@@ -54,7 +54,7 @@ PROGRAMS_DIR="$LOCALAPPDATA/Programs/WidgetHubSuite/Skins"
 [ -d "$PROGRAMS_DIR" ] || PROGRAMS_DIR="$HOME/AppData/Local/Programs/WidgetHubSuite/Skins"
 [ -d "$PROGRAMS_DIR" ] || PROGRAMS_DIR="$HOME/AppData/Local/Programs"
 echo "    挂件来源: $PROGRAMS_DIR"
-"$DOTNET" run --project tools/Diagnostics -c Release --no-build -- --pack \
+"$DOTNET" run --project tools/Diagnostics -c Release -- --pack \
   "$HERE/WidgetHub/publish48" "$PROGRAMS_DIR" "$HERE/stage" "$HERE/installer/WidgetHubSetup/payload.zip"
 "$DOTNET" publish installer/WidgetHubSetup/WidgetHubSetup.csproj -c Release -o installer/WidgetHubSetup/out -v quiet --nologo
 cp -f installer/WidgetHubSetup/out/WidgetHubSetup.exe ./WidgetHubSetup-$TAG.exe
@@ -96,8 +96,9 @@ AUTH=(-H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github
 
 # 注意：不能用 <(python ...) 进程替换喂给 curl 的 --data-binary —— Windows 上的 curl
 # 打不开 /dev/fd/NN 这种伪路径（实测报 "error encountered when reading a file"）。
-# 先落成临时文件再传。
-JSON_TMP="$(mktemp)"
+# 先落成临时文件再传。用仓库内相对路径（不带盘符），否则沙箱的 safe-delete 会拒绝对
+# 带盘符的临时文件执行 rm。
+JSON_TMP="$HERE/.relbody.tmp"
 trap 'rm -f "$JSON_TMP"' EXIT
 BODY="$BODY" TAG="$TAG" OUT="$JSON_TMP" python - > /dev/null << 'PY'
 import json, os

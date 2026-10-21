@@ -18,7 +18,7 @@
     <Reference Include="System.IO.Compression.FileSystem" />
   </ItemGroup>
   <ItemGroup>
-    <!-- 由 build_package.cmd 生成：把 WidgetHub + 10 个挂件打包成 payload.zip -->
+    <!-- 由 tools/Diagnostics 生成：把 WidgetHub + 12 个挂件打包成 payload.zip -->
     <EmbeddedResource Include="payload.zip" LogicalName="payload.zip" Condition="Exists('payload.zip')" />
   </ItemGroup>
 </Project>
