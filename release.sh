@@ -94,6 +94,21 @@ fi
 API="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME"
 AUTH=(-H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" -H "User-Agent: WidgetHub-Release")
 
+# 注意：不能用 <(python ...) 进程替换喂给 curl 的 --data-binary —— Windows 上的 curl
+# 打不开 /dev/fd/NN 这种伪路径（实测报 "error encountered when reading a file"）。
+# 先落成临时文件再传。
+JSON_TMP="$(mktemp)"
+trap 'rm -f "$JSON_TMP"' EXIT
+BODY="$BODY" TAG="$TAG" OUT="$JSON_TMP" python - > /dev/null << 'PY'
+import json, os
+json.dump({'tag_name': os.environ['TAG'],
+           'name': '桌面挂件合集 ' + os.environ['TAG'],
+           'body': os.environ['BODY'],
+           'draft': False, 'prerelease': False},
+          open(os.environ['OUT'], 'w', encoding='utf-8'), ensure_ascii=False)
+PY
+echo "    正文已写入 $JSON_TMP（$(wc -c < "$JSON_TMP") 字节）"
+
 # 幂等：Release 已存在就复用（重跑不会 422），顺便把正文刷成最新的 RELEASE_NOTES.md
 REL_ID=$(curl -s "$API/releases/tags/$TAG" "${AUTH[@]}" \
   | python -c "import json,sys; d=json.load(sys.stdin); print(d.get('id') or '')")
@@ -101,17 +116,11 @@ if [ -n "$REL_ID" ]; then
   echo "    Release $TAG 已存在（id=$REL_ID），更新正文并复用"
   curl -s -X PATCH "$API/releases/$REL_ID" "${AUTH[@]}" \
     -H "Content-Type: application/json; charset=utf-8" \
-    --data-binary @<(python -c "
-import json,sys
-print(json.dumps({'name':'桌面挂件合集 $TAG','body':sys.stdin.read(),'draft':False,'prerelease':False},ensure_ascii=False))
-" <<< "$BODY") > /dev/null
+    --data-binary "@$JSON_TMP" -o /dev/null -w "   更新正文: %{http_code}\n"
 else
   curl -s -X POST "$API/releases" "${AUTH[@]}" \
     -H "Content-Type: application/json; charset=utf-8" \
-    --data-binary @<(python -c "
-import json,sys
-print(json.dumps({'tag_name':'$TAG','name':'桌面挂件合集 $TAG','body':sys.stdin.read(),'draft':False,'prerelease':False},ensure_ascii=False))
-" <<< "$BODY") > /dev/null
+    --data-binary "@$JSON_TMP" -o /dev/null -w "   创建 Release: %{http_code}\n"
 fi
 
 UPLOAD_URL=$(curl -s "$API/releases/tags/$TAG" "${AUTH[@]}" \
