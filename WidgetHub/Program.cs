@@ -53,7 +53,7 @@ namespace WidgetHub
     /// <summary>版本与更新源信息。</summary>
     public static class AppInfo
     {
-        public const string Version = "1.3";
+        public const string Version = "1.4";
         public const string DisplayName = "桌面挂件合集";
         public const string RepoOwner = "feibixunchang";
         // GitHub 不允许仓库名带中文（会被剥成空），所以仓库用 ASCII 名，中文名放在描述/README
@@ -617,6 +617,24 @@ namespace WidgetHub
             return Defaults();
         }
 
+        /// <summary>
+        /// 热重载专用：读得出来就返回，读不出来（文件正被别的进程写/损坏/不存在）返回 null。
+        /// 不能用 Load() —— 它读失败会返回默认配置，直接赋值会把用户的真配置冲掉。
+        /// </summary>
+        public static Config? TryLoad()
+        {
+            try
+            {
+                if (File.Exists(Path_))
+                {
+                    var c = JsonSerializer.Deserialize<Config>(File.ReadAllText(Path_));
+                    if (c != null) { c.Normalize(); return c; }
+                }
+            }
+            catch { }
+            return null;
+        }
+
         // 老配置升级：补齐后来新增的字段
         public void Normalize()
         {
@@ -945,6 +963,7 @@ namespace WidgetHub
             var exeName = Path.GetFileNameWithoutExtension(s.ExeName);
             Process[] list;
             try { list = Process.GetProcessesByName(exeName); } catch { return null; }
+            Process? sameName = null;
             foreach (var p in list)
             {
                 bool hit = false;
@@ -955,8 +974,16 @@ namespace WidgetHub
                 }
                 catch { hit = true; }   // 读不到模块信息但进程名一致，视为运行中
                 if (hit) { s.Process = p; return p; }
-                p.Dispose();
+
+                // 同名但路径不同：这也是这个挂件。
+                //
+                // 桌面音乐挂件同时住着两份（用户直接启动的 Programs\DesktopMusic
+                // 和管理器管的 WidgetHubSuite\Skins\DesktopMusic），只认管理器
+                // 那条路径的话，用户自己从快捷方式启动的那份会被算成"已停止"，
+                // 界面上就出现"明明在跑却写着已停止"。
+                if (sameName == null) sameName = p; else p.Dispose();
             }
+            if (sameName != null) { s.Process = sameName; return sameName; }
             return null;
         }
 
@@ -970,6 +997,9 @@ namespace WidgetHub
             }
             return FindRunning(s) != null;
         }
+
+        /// <summary>取挂件当前正在运行的那个进程（没有就 null）。</summary>
+        public static Process? RunningProcess(Skin s) => FindRunning(s);
 
         public static Process? Start(Skin s)
         {
@@ -1490,6 +1520,9 @@ namespace WidgetHub
         private System.Windows.Forms.Timer layerTimer = null!;
         private (int Row, int Col) hoverCell = (-1, -1);
         private bool silent = false;
+        private bool _selfSave = false;          // 自己存配置时别触发热重载
+        private FileSystemWatcher? _cfgWatch;
+        private System.Windows.Forms.Timer? _cfgTimer;
 
         public ManagerForm(bool headless = false)
         {
@@ -1513,6 +1546,7 @@ namespace WidgetHub
             UpdateStatuses();
             ApplyAutoStartManager();
             StartStatusTimer();
+            WatchConfig();     // 安装器改 config.json 时，界面（含窗口高度）跟着变
         }
 
         private void BuildUI()
@@ -1522,7 +1556,11 @@ namespace WidgetHub
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Microsoft YaHei", 10F);
             Width = 1080; Height = 740;
-            MinimumSize = new Size(880, 520);
+            // 高度下限只留"表头 + 两行"的量（约 84 品牌栏 + 58 工具栏 + 42 表头
+            // + 2×40 行 + 56 边框 ≈ 320）。卡在 520 的话，挂件一少窗口就缩不下去，
+            // 底下又逼出一片空白，自适应就白做了。
+            // 注意 net48 的 MinimumSize 不随 AutoScaleMode.Dpi 缩放，这里按物理像素给。
+            MinimumSize = new Size(880, 330);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.Sizable;
             BackColor = CBack;
@@ -1619,7 +1657,7 @@ namespace WidgetHub
             toolbar.Controls.Add(B("全部启动", () => { foreach (var s in config.Skins) Launcher.Start(s); UpdateStatuses(); }, CAccent, CAccentD));
             toolbar.Controls.Add(B("全部停止", () => { foreach (var s in config.Skins) Launcher.Stop(s); UpdateStatuses(); }, Color.FromArgb(239, 68, 68), Color.FromArgb(220, 38, 38)));
             toolbar.Controls.Add(B("全部归位", () => { foreach (var s in config.Skins) Launcher.Reapply(s); UpdateStatuses(); }, Color.FromArgb(16, 185, 129), Color.FromArgb(5, 150, 105)));
-            toolbar.Controls.Add(B("保存配置", () => { SyncAll(); config.Save(); MessageBox.Show("配置已保存。", "WidgetHub"); }, CSecondary, CSecondaryD));
+            toolbar.Controls.Add(B("保存配置", () => { SyncAll(); SaveConfig(); RefreshGrid(); MessageBox.Show("配置已保存。", "WidgetHub"); }, CSecondary, CSecondaryD));
             toolbar.Controls.Add(B("刷新状态", () => { RefreshGrid(); ClearHighlight(); UpdateStatuses(); }, CSecondary, CSecondaryD));
             toolbar.Controls.Add(B("拖尾特效…", () => ShowTrailSettings(), Color.FromArgb(139, 92, 246), Color.FromArgb(124, 58, 237)));
 
@@ -1688,15 +1726,20 @@ namespace WidgetHub
             };
             grid.CellMouseLeave += (_, _) => { if (hoverCell.Row >= 0) { var p = hoverCell; hoverCell = (-1, -1); grid.InvalidateCell(p.Col, p.Row); } };
 
+            // 列宽：全部用 FillWeight 均分表格宽度。
+            // MinimumWidth 必须给够 —— 150% DPI 下"自启"两个字要 ~44px，
+            // 给窄了表头会折成竖排一行（"自""启"上下叠），很难看。
+            // 这几个数是实测下限（中文两字 44px / 三字 60px / 五字 76px）再加余量。
             grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Name", HeaderText = "挂件（皮肤）", ReadOnly = true, FillWeight = 24, MinimumWidth = 130 });
-            grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", HeaderText = "自启", FillWeight = 8, MinimumWidth = 50 });
-            grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "TopMost", HeaderText = "置顶", FillWeight = 8, MinimumWidth = 56 });
-            grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "ClickThrough", HeaderText = "穿透", FillWeight = 8, MinimumWidth = 50 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Opacity", HeaderText = "透明度", FillWeight = 9, MinimumWidth = 60 });
-            grid.Columns.Add(new DataGridViewButtonColumn { Name = "Toggle", HeaderText = "启动 / 停止", FillWeight = 12, MinimumWidth = 100 });
+            grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", HeaderText = "自启", FillWeight = 8, MinimumWidth = 58 });
+            grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "TopMost", HeaderText = "置顶", FillWeight = 8, MinimumWidth = 58 });
+            grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "ClickThrough", HeaderText = "穿透", FillWeight = 8, MinimumWidth = 58 });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Opacity", HeaderText = "透明度", FillWeight = 9, MinimumWidth = 72 });
+            grid.Columns.Add(new DataGridViewButtonColumn { Name = "Toggle", HeaderText = "启动 / 停止", FillWeight = 12, MinimumWidth = 106 });
+            grid.Columns["Toggle"].ToolTipText = "这一列显示的是当前状态：已启动 / 已停止。点一下可以启停对应的挂件。";
             grid.Columns.Add(new DataGridViewButtonColumn { Name = "Capture", HeaderText = "位置记忆", FillWeight = 12, MinimumWidth = 100 });
-            grid.Columns.Add(new DataGridViewButtonColumn { Name = "Settings", HeaderText = "设置", FillWeight = 8, MinimumWidth = 74 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "状态", ReadOnly = true, FillWeight = 9, MinimumWidth = 64 });
+            grid.Columns.Add(new DataGridViewButtonColumn { Name = "Settings", HeaderText = "设置", FillWeight = 8, MinimumWidth = 76 });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "状态", ReadOnly = true, FillWeight = 9, MinimumWidth = 72 });
 
             Controls.Add(grid);
             Controls.Add(toolbar);
@@ -1777,8 +1820,11 @@ namespace WidgetHub
             }
             else
             {
-                fill = CAccent;
-                text = e.Value?.ToString() ?? "启动";
+                // 启动/停止这一列显示的是当前状态：跑着是绿色"已启动"，
+                // 没跑是灰色"已停止"。配色跟着文字走，一眼能分清。
+                string t = e.Value?.ToString() ?? "已停止";
+                if (t.Contains("已启动")) { fill = CGreen; text = t; }
+                else { fill = CSecondary; text = t; }
             }
             RoundedButton(e.Graphics, e.CellBounds, fill, text, hover);
             e.Handled = true;
@@ -1790,11 +1836,14 @@ namespace WidgetHub
             grid.Rows.Clear();
             foreach (var s in config.Skins)
             {
-                bool run = Launcher.IsRunning(s);
+                var proc = Launcher.RunningProcess(s);
+                bool run = proc != null;
                 string capText = s.Positionless ? "无需记录" : (s.PositionSaved ? "已记录位置" : "记录位置");
                 int i = grid.Rows.Add(s.Name, s.Enabled, s.TopMost, s.ClickThrough, s.Opacity,
-                                      run ? "停止" : "启动", capText, run ? "运行中" : "已停止");
+                                      run ? "已启动" : "已停止", capText, StatusText(proc));
                 grid.Rows[i].Tag = s;
+                grid.Rows[i].Cells["Toggle"].ToolTipText = run ? "正在运行 —— 点一下停止" : "没有运行 —— 点一下启动";
+                grid.Rows[i].Cells["Status"].ToolTipText = StatusTip(proc);
             }
             silent = false;
             // 挂件数量变了（新增/合并去重）要重新适应高度，否则 150% DPI 下行高被撑大，
@@ -1808,42 +1857,150 @@ namespace WidgetHub
 
         private int _fitRows = -1;
 
+        /// <summary>自己存配置：存之前打标记，免得刚写完就被文件监听重载一遍。</summary>
+        private void SaveConfig()
+        {
+            _selfSave = true;
+            config.Save();
+        }
+
         /// <summary>
-        /// 让窗口高度刚好容纳所有行。只在行数变化时调整：
-        /// 用户手动拖大/拖小的窗口不会被反复改回去。
+        /// 盯着 config.json：安装器加/删挂件、用户手改配置，管理器这边要跟着变，
+        /// 行数一变 RefreshGrid 就会触发 FitHeightToGrid，窗口高度跟着调。
         ///
-        /// 行高必须按 DataGridViewRow.Height 实测求和，并且要乘上 DPI 缩放系数：
-        /// AutoScaleMode.Dpi 会把表格的字号和行高按 DPI 放大（150% 下 40 的设计行高
-        /// 实际渲染成 60），而窗体 Height 是物理像素、顶栏/工具栏却还是设计值，
-        /// 不乘系数就算出来永远差一截，底下几行只能靠滚动条看。
+        /// 两个坑：
+        /// 1) 安装器是 File.WriteAllText 直接覆盖，写到一半可能读到半个 JSON，
+        ///    所以延一会儿再读，读失败（TryLoad 返回 null）就当没这回事；
+        /// 2) 监听回调跑在线程池线程上，WinForms 的 Timer 只能在 UI 线程启停，
+        ///    必须 BeginInvoke 回界面线程，否则跨线程异常会被静默吞掉、监听形同虚设。
+        /// </summary>
+        private void WatchConfig()
+        {
+            try
+            {
+                string dir = Path.GetDirectoryName(Config.Path_)!;
+                Directory.CreateDirectory(dir);
+                var w = new FileSystemWatcher(dir)
+                {
+                    Filter = "config.json",
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+                    EnableRaisingEvents = true
+                };
+                w.Changed += (_, _) => KickReload();
+                w.Created += (_, _) => KickReload();
+                _cfgWatch = w;
+                Log.W($"config.json 监听已启动：{dir}");
+            }
+            catch (Exception ex) { Log.W("config.json 监听启动失败：" + ex.Message); }
+        }
+
+        private DateTime _cfgKickAt = DateTime.MinValue;
+
+        /// <summary>config.json 变了：合并 500ms 内的连续写入，只排一次重载。</summary>
+        private void KickReload()
+        {
+            try
+            {
+                if (!IsHandleCreated) return;
+                var now = DateTime.UtcNow;
+                if (_cfgKickAt != DateTime.MinValue && (now - _cfgKickAt).TotalMilliseconds < 500) return;
+                _cfgKickAt = now;
+                BeginInvoke(new Action(() =>
+                {
+                    if (_cfgTimer == null)
+                    {
+                        _cfgTimer = new System.Windows.Forms.Timer { Interval = 400 };
+                        _cfgTimer.Tick += (_, _) => { _cfgTimer.Stop(); ReloadConfigExternal(); };
+                    }
+                    _cfgTimer.Stop();
+                    _cfgTimer.Start();
+                }));
+            }
+            catch { }
+        }
+
+        /// <summary>把磁盘上的 config.json 读回来刷新界面（读失败就保持原样）。</summary>
+        private void ReloadConfigExternal()
+        {
+            try
+            {
+                if (_selfSave) { _selfSave = false; return; }   // 自己刚写的，跳过
+                var fresh = Config.TryLoad();
+                if (fresh == null) return;                      // 正被写入/读坏了，等下一次
+                int before = config.Skins.Count;
+                config = fresh;
+                RefreshGrid();
+                UpdateStatuses();
+                if (before != config.Skins.Count)
+                    Log.W($"config.json 外部变化：挂件 {before} → {config.Skins.Count}，已重载并调整窗口高度");
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// 让窗口高度刚好容纳所有行 —— 多一行长一点，少一行短一点。
+        ///
+        /// 高度必须用"实测像素"算，不能乘 DPI 系数：
+        /// DataGridViewRow.Height / ColumnHeadersHeight 报出来的就已经是
+        /// 设备像素（这台机器 150% DPI 下实测每行 40px、列头 42px），
+        /// 再乘一遍 1.5 等于凭空多出 340 像素，底下就空出一大片。
+        ///
+        /// 只在行数变化时调整：用户手动拖大/拖小的窗口不会被反复改回去。
         /// </summary>
         private void FitHeightToGrid()
         {
             try
             {
-                if (grid == null || grid.Rows.Count == 0) return;
+                if (grid == null) return;
+                grid.PerformLayout();     // 先把布局跑完，量出来的尺寸才准
+
+                // 一行都没有（配置被清空/挂件全删了）：直接缩到下限，不留个空架子
+                if (grid.Rows.Count == 0)
+                {
+                    if (Math.Abs(Height - MinimumSize.Height) > 2) Height = MinimumSize.Height;
+                    _fitRows = 0;
+                    return;
+                }
+
                 int rowsHeight = 0;
                 foreach (DataGridViewRow row in grid.Rows) rowsHeight += row.Height;
 
-                // DeviceDpi 有时还是设计时的 96（在 SetProcessDPIAware 之前缓存的），
-                // 用窗体 DC 实测一次才准；取两者最大，宁大不小。
-                float k = 1f;
-                try { using (var g = CreateGraphics()) k = Math.Max(k, g.DpiX / 96f); } catch { }
-                try { using (var g = grid.CreateGraphics()) k = Math.Max(k, g.DpiX / 96f); } catch { }
-                k = Math.Max(k, DeviceDpi / 96f);
-                // chrome 用 Height-grid.Height 实测，比真实渲染的顶栏+工具栏少十几像素，
-                // 余量给足；宁可高一点也别卡掉最后一行。
-                int need = (int)Math.Ceiling((grid.ColumnHeadersHeight + rowsHeight) * k) + 80;
-                int chrome = Height - grid.Height;      // 顶栏、工具栏、标题框等占的高度
-                int want = chrome + need;
-                var screen = Screen.PrimaryScreen.WorkingArea;
-                int max = Math.Max(MinimumSize.Height, screen.Height - 80);
-                int h = Math.Min(Math.Max(want, MinimumSize.Height), max);
-                Log.W($"FitHeight rows={grid.Rows.Count} rowsH={rowsHeight} k={k} chrome={chrome} want={want} cur={Height}");
-                if (Math.Abs(h - Height) > 2) Height = h;
+                // 列宽放不下时表格底部会出现横向滚动条，它也占高度
+                int scrollH = HorizontalScrollBarHeight();
 
-                // 兜底：DPI、滚动条、单元格内边距的零头算不死，直接看实际显示了几行，
-                // 少几行就补几行的高度，直到所有行都落进窗口。
+                // 表头 + 所有行 + 滚动条，再留 4px 防止差一像素就冒出滚动条
+                int need = grid.ColumnHeadersHeight + rowsHeight + scrollH + 4;
+
+                // 全部在"客户区坐标系"里算，不掺物理/逻辑像素的换算：
+                //   chrome = 客户区里除表格以外的部分（品牌栏 + 工具栏）
+                //   border = 标题栏 + 窗口边框
+                int chrome = ClientSize.Height - grid.Height;
+                if (chrome < 0) chrome = 0;
+                int border = Height - ClientSize.Height;
+                int want = chrome + need + border;
+
+                // 用窗口所在屏幕的工作区：多屏时窗口可能不在主屏上
+                var wa = (Screen.FromControl(this) ?? Screen.PrimaryScreen).WorkingArea;
+                int max = Math.Max(MinimumSize.Height, wa.Height - 60);
+                int h = Math.Min(Math.Max(want, MinimumSize.Height), max);
+                Log.W($"FitHeight rows={grid.Rows.Count} rowsH={rowsHeight} headH={grid.ColumnHeadersHeight} "
+                    + $"scrollH={scrollH} need={need} chrome={chrome} border={border} want={want} cur={Height} "
+                    + $"gridW={grid.ClientSize.Width} colW={SumColumnWidth()}");
+                if (Math.Abs(h - Height) > 2)
+                {
+                    Height = h;
+                    grid.PerformLayout();
+                    // 变高之后底边可能探出屏幕（窗口停在下半屏时）：整体上移，贴住屏幕底
+                    if (Bottom > wa.Bottom)
+                    {
+                        int nt = wa.Bottom - h;
+                        if (nt < wa.Top) nt = wa.Top;
+                        Top = nt;
+                    }
+                }
+
+                // 兜底：万一还有行没显示出来（字号、缩放、单元格内边距的零头算不死），
+                // 直接看实际显示了几行，少几行就补几行的高度。
                 // 注意 net48 的 DataGridView.DisplayedRowCount 是方法不是属性。
                 for (int i = 0; i < 12; i++)
                 {
@@ -1851,14 +2008,45 @@ namespace WidgetHub
                     try { shown = grid.DisplayedRowCount(false); } catch { break; }
                     int missing = grid.Rows.Count - shown;
                     if (missing <= 0) break;
-                    int per = (int)Math.Ceiling((double)need / Math.Max(1, grid.Rows.Count));
-                    Height += missing * per + 16;
+                    int per = Math.Max(1, rowsHeight / Math.Max(1, grid.Rows.Count));
+                    Height += missing * per + 8;
+                    if (Height > max) Height = max;   // 屏幕装不下就不再长，剩下的靠表格滚动条
+                    grid.PerformLayout();
                     if (Height >= max) break;
                 }
 
                 _fitRows = grid.Rows.Count;
             }
             catch { }
+        }
+
+        /// <summary>所有列的宽度之和，用来判断会不会挤出横向滚动条。</summary>
+        private int SumColumnWidth()
+        {
+            int w = 0;
+            try { foreach (DataGridViewColumn c in grid.Columns) w += c.Width; } catch { }
+            return w;
+        }
+
+        /// <summary>
+        /// 表格底部那条横向滚动条的高度（列宽放不下时才会出现）。
+        /// DataGridView 没有公开的 HorizontalScroll 属性，只能从子控件里找。
+        /// </summary>
+        private int HorizontalScrollBarHeight()
+        {
+            try
+            {
+                // DataGridView 的横向滚动条是 VScrollBar/HScrollBar 子控件，
+                // 类型判断要靠名字：H 开头的才是横向的
+                foreach (Control c in grid.Controls)
+                {
+                    if (c is ScrollBar sb && sb.GetType().Name.StartsWith("H")
+                        && sb.Visible)
+                        return sb.Height;
+                }
+            }
+            catch { }
+            return 0;
         }
 
         // 只刷新"状态"和"启动/停止"两列，不重建整张表，避免闪烁和选中丢失
@@ -1871,18 +2059,56 @@ namespace WidgetHub
                 foreach (DataGridViewRow row in grid.Rows)
                 {
                     if (row.Tag is not Skin s) continue;
-                    bool run = Launcher.IsRunning(s);
+                    var proc = Launcher.RunningProcess(s);
+                    bool run = proc != null;
                     bool changed = false;
-                    string st = run ? "运行中" : "已停止";
+                    string st = StatusText(proc);
                     if (!Equals(row.Cells["Status"].Value as string, st)) { row.Cells["Status"].Value = st; changed = true; }
-                    string tg = run ? "停止" : "启动";
+                    row.Cells["Status"].ToolTipText = StatusTip(proc);
+                    // 这一列显示的是"现在是什么状态"，不是"点了会做什么"：
+                    // 跑着就写"已启动"，没跑就写"已停止"。想启停就点它一下。
+                    string tg = run ? "已启动" : "已停止";
                     if (!Equals(row.Cells["Toggle"].Value as string, tg)) { row.Cells["Toggle"].Value = tg; changed = true; }
+                    row.Cells["Toggle"].ToolTipText = run ? "正在运行 —— 点一下停止" : "没有运行 —— 点一下启动";
                     string cap = s.Positionless ? "无需记录" : (s.PositionSaved ? "已记录位置" : "记录位置");
                     if (!Equals(row.Cells["Capture"].Value as string, cap)) { row.Cells["Capture"].Value = cap; changed = true; }
                     if (changed) grid.InvalidateRow(row.Index);
                 }
             }
             finally { silent = false; }
+        }
+
+        /// <summary>
+        /// 状态列的文字：跑着就显示已经跑了多久，没跑就是一个破折号。
+        ///
+        /// 写成"12 分"这样的短句而不是"运行中 · 进程号"，是因为这一列只有
+        /// 64 像素宽，长了会把整张表挤到需要横向滚动；而"启动/停止"那一列
+        /// 已经用"已启动/已停止"把状态说清楚了，这里补一个"跑了多久"更有用。
+        /// </summary>
+        private static string StatusText(Process? proc)
+        {
+            if (proc == null) return "—";
+            try
+            {
+                var span = DateTime.Now - proc.StartTime;
+                if (span.TotalMinutes < 1) return "刚启动";
+                if (span.TotalHours < 1) return ((int)span.TotalMinutes) + " 分";
+                if (span.TotalDays < 1) return ((int)span.TotalHours) + " 时";
+                return ((int)span.TotalDays) + " 天";
+            }
+            catch { return "运行中"; }
+        }
+
+        /// <summary>状态列的鼠标提示：把"跑了多久"说全。</summary>
+        private static string StatusTip(Process? proc)
+        {
+            if (proc == null) return "没有运行";
+            try
+            {
+                var span = DateTime.Now - proc.StartTime;
+                return "已运行 " + ((int)span.TotalMinutes) + " 分钟（进程号 " + proc.Id + "）";
+            }
+            catch { return "运行中"; }
         }
 
         private void SyncRow(Skin s, DataGridViewRow row)
@@ -1943,7 +2169,7 @@ namespace WidgetHub
                 }
                 s.X = r.Left; s.Y = r.Top; s.Width = r.Right - r.Left; s.Height = r.Bottom - r.Top;
                 s.PositionSaved = true;
-                config.Save();
+                SaveConfig();
                 // 记录后立刻摆一次并开启校验，保证挂件不会又飘回原处
                 Launcher.Reapply(s);
                 grid.InvalidateRow(e.RowIndex);
@@ -1978,7 +2204,7 @@ namespace WidgetHub
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             SyncAll();
-            config.Save();
+            SaveConfig();
             // 用户点右上角 X：收进托盘继续运行（不退出），真正的退出走托盘菜单"退出"
             if (!_reallyExit && e.CloseReason == CloseReason.UserClosing)
             {
