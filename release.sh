@@ -126,7 +126,9 @@ fi
 
 UPLOAD_URL=$(curl -s "$API/releases/tags/$TAG" "${AUTH[@]}" \
   | python -c "import json,sys; d=json.load(sys.stdin); print(d.get('upload_url',''))")
-UPLOAD_URL=${UPLOAD_URL%%\?*}
+# upload_url 形如 .../assets{?name,label}（GitHub 的 URI 模板语法），里面既没有 '?'
+# 也没有 '{'，所以 %%?* 根本切不掉那段模板——直接把首个 '?' 或 '{' 起的全部截掉。
+UPLOAD_URL=$(echo "$UPLOAD_URL" | sed -E 's/[?{].*//')
 if [ -n "$UPLOAD_URL" ]; then
   # 同名附件已存在先删掉，否则上传会 422
   OLD_ID=$(curl -s "$API/releases/tags/$TAG/assets" "${AUTH[@]}" \
