@@ -16,6 +16,7 @@ internal static class Pack
         ("桌面RSS", "RssWidget", "RssWidget.exe"),
         ("桌面记事", "DesktopNotes", "DesktopNotes.exe"),
         ("桌面相框", "DesktopPhoto", "DesktopPhoto.exe"),
+        ("桌面阴历", "DesktopLunar", "DesktopLunar.exe"),
         ("炫彩鼠标尾巴", "NeonMouseTrail", "NeonMouseTrail.exe"),
     };
 

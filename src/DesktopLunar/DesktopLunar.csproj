@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ApplicationIcon>..\Shared\Assets\desktopcalendar.ico</ApplicationIcon>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>DesktopLunar</AssemblyName>
+    <RootNamespace>DesktopLunar</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyTitle>桌面阴历</AssemblyTitle>
+    <Product>桌面阴历</Product>
+    <Description>桌面阴历：单行透明显示公历日期、时分秒与农历（干支生肖年 + 农历月日）</Description>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ico embedded as manifest resource: AppIcon.LoadFromAssembly() uses it for tray icon -->
+    <EmbeddedResource Include="..\Shared\Assets\desktopcalendar.ico" />
+  </ItemGroup>
+</Project>
