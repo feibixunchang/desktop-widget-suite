@@ -23,6 +23,7 @@ import cairo
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 USER_DIR = os.path.expanduser('~/.local/share/desktop-widget/')
 CONFIG_PATH = os.path.join(USER_DIR, 'config.json')
+FORECAST_CACHE = os.path.join(USER_DIR, 'forecast_cache.json')
 DEFAULT_FONT = _SYS_FONT + ''
 BASE_FONT_SIZE = 34
 
@@ -64,7 +65,8 @@ def load_config():
 
 
 class WeatherFetcher:
-    """多数据源天气获取: 和风天气(需key) -> Open-Meteo(公共) -> wttr.in(公共), 自动切换"""
+    """多数据源天气获取: Open-Meteo(实时+7天预报) -> 7timer.info(7天预报) ->
+    wttr.in(实时+3天预报), 自动切换; 预报带磁盘缓存, 全源失败时用最后一次成功的 7 天"""
 
     WMO = {
         0: '晴', 1: '多云', 2: '多云', 3: '阴', 45: '雾', 48: '雾凇',
@@ -73,6 +75,14 @@ class WeatherFetcher:
         71: '小雪', 73: '中雪', 75: '大雪', 77: '雪粒',
         80: '阵雨', 81: '阵雨', 82: '强阵雨', 85: '阵雪', 86: '阵雪',
         95: '雷阵雨', 96: '雷阵雨', 99: '雷阵雨',
+    }
+    # 7timer.info civillight 天气码 -> 中文
+    T7 = {
+        'clear': '晴', 'pcloudy': '晴间多云', 'mcloudy': '多云', 'cloudy': '阴',
+        'lightrain': '小雨', 'oshower': '阵雨', 'ishower': '阵雨',
+        'lightsnow': '小雪', 'rain': '中雨', 'snow': '中雪',
+        'rainsnow': '雨夹雪', 'ts': '雷阵雨', 'tstorm': '雷阵雨',
+        'humid': '湿热', 'windy': '大风',
     }
     DIRS = ['北', '东北偏北', '东北', '东北偏东', '东', '东南偏东', '东南', '东南偏南',
             '南', '西南偏南', '西南', '西南偏西', '西', '西北偏西', '西北', '西北偏北']
@@ -352,6 +362,33 @@ class WeatherFetcher:
             self.forecast = days
         return now
 
+    # ─── 数据源3: 7timer.info (公共, 无需key, 仅 7 天预报) ───
+    def _fetch_7timer(self):
+        """Open-Meteo 限额(429)时补 7 天预报。wttr.in 免费端点只有 3 天,
+        不能作为 7 天预报的兜底。本源无实时天气, 返回 None。"""
+        geo = self._geo or self._geo_lookup()
+        if not geo:
+            return None
+        lat, lon = geo
+        url = ('http://www.7timer.info/bin/api.pl?lon=%s&lat=%s'
+               '&product=civillight&output=json' % (lon, lat))
+        data = self._http_get(url)
+        days = []
+        for d in data.get('dataseries', []):
+            raw = d.get('date')
+            try:
+                date = '%04d-%02d-%02d' % (raw // 10000, raw % 10000 // 100, raw % 100)
+            except Exception:
+                continue
+            t = d.get('temp2m') or {}
+            days.append({'date': date,
+                         'text': self.T7.get(d.get('weather'), d.get('weather') or '未知'),
+                         'tmax': t.get('max', ''),
+                         'tmin': t.get('min', '')})
+        if days:
+            self.forecast = days
+        return None
+
     # ─── 主流程: Open-Meteo 优先, wttr.in 兜底 ───
     def fetch(self):
         self.last_attempt = time.time()
@@ -374,6 +411,7 @@ class WeatherFetcher:
 
     def fetch_forecast(self):
         for name, fn in (('Open-Meteo', self._fetch_openmeteo),
+                         ('7timer.info', self._fetch_7timer),
                          ('wttr.in', self._fetch_wttr)):
             try:
                 self.forecast = None
@@ -382,7 +420,42 @@ class WeatherFetcher:
                 log('forecast %s: %s' % (name, e))
             if self.forecast:
                 log('forecast ok [%s]: %s' % (name, self.get_forecast_text()))
+                self._save_forecast_cache()
                 return
+        # 在线源全失败 -> 磁盘缓存(最后一次成功的 7 天预报)
+        cached = self._load_forecast_cache()
+        if cached:
+            self.forecast = cached
+            log('forecast ok [disk cache]: %s' % self.get_forecast_text())
+
+    def _save_forecast_cache(self):
+        try:
+            with self.lock:
+                f = self.forecast
+            if not f:
+                return
+            tmp = FORECAST_CACHE + '.tmp'
+            with open(tmp, 'w') as fp:
+                json.dump({'saved': time.time(), 'days': f}, fp, ensure_ascii=False)
+            os.replace(tmp, FORECAST_CACHE)
+        except Exception as e:
+            log('forecast cache save: ' + str(e))
+
+    def _load_forecast_cache(self):
+        """读磁盘上最后一次成功的预报, 只保留日期未过期的条目"""
+        try:
+            with open(FORECAST_CACHE) as fp:
+                obj = json.load(fp)
+            days = obj.get('days') or []
+            today = datetime.date.today().isoformat()
+            fresh = [d for d in days if str(d.get('date', '')) >= today]
+            if not fresh:
+                return None
+            age = (time.time() - float(obj.get('saved', 0))) / 3600.0
+            log('forecast cache: %d 天有效（%.1f 小时前的数据）' % (len(fresh), age))
+            return fresh
+        except Exception:
+            return None
 
     def get_forecast_text(self):
         with self.lock:
