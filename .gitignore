@@ -5,3 +5,5 @@ upgrade_publish_2.9.82.sh
 clean_history_publish.sh
 linux/dist/*.deb
 finish_publish.sh
+upgrade_publish_2.9.83.sh
+upgrade_publish_2.9.84.sh

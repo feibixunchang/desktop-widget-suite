@@ -94,8 +94,8 @@ DEFAULT_CFG = {
     'show_mem': True,
     'show_net': True,
     'show_weather': True,
-    'weather_display': '安宁市',       # 显示用的地点名
-    'weather_location': '24.87,102.62',  # 查询用位置（经纬度或城市名，公共接口 wttr.in）
+    'weather_display': '北京市',       # 显示用的地点名
+    'weather_location': '北京市',  # 查询用位置（城市名或 纬度,经度；Open-Meteo 公共接口，支持村级）
     'weather_refresh': 900,            # 刷新间隔（秒）
     # 任务栏内水平偏移(像素)。0 = 紧贴任务栏最左端; 调大可让信息条避开
     # dde-dock 的启动器/搜索图标。60 为实测合适的默认位置。
@@ -370,15 +370,30 @@ class WeatherFetcher:
         except Exception:
             return '--'
 
+    @staticmethod
+    def _strip_suffix(name):
+        """GeoNames 对「北京市」这类带行政后缀的词条常返回空，剥离后再试"""
+        for suf in ('特别行政区', '自治区', '地区', '盟', '自治州', '市', '县', '区'):
+            if name.endswith(suf) and len(name) > len(suf):
+                return name[:-len(suf)]
+        return name
+
     def _geo(self):
-        loc = str(self.cfg.get('weather_location', '24.87,102.62')).strip()
+        loc = str(self.cfg.get('weather_location', '北京市')).strip()
         if ',' in loc:
             a, b = loc.split(',', 1)
             return float(a), float(b)
-        url = ('https://geocoding-api.open-meteo.com/v1/search?name=%s&count=1&language=zh'
-               % urllib.parse.quote(loc))
-        data = self._json(url)
-        result = (data.get('results') or [{}])[0]
+        result = {}
+        for name in (loc, self._strip_suffix(loc)):    # 原样 -> 剥离行政后缀
+            url = ('https://geocoding-api.open-meteo.com/v1/search?name=%s&count=1&language=zh'
+                   % urllib.parse.quote(name))
+            data = self._json(url)
+            rs = data.get('results') or []
+            if rs:
+                result = rs[0]
+                break
+        if not result:
+            raise ValueError('未找到地点: %s' % loc)
         return float(result['latitude']), float(result['longitude'])
 
     @staticmethod
@@ -1453,7 +1468,7 @@ class TimeBar:
         self._down_text = fmt_speed(down)
         if self.show_weather:
             self.weather.maybe_refresh()      # 15 分钟到期才真正联网
-            name = self.cfg.get('weather_display', '安宁市')
+            name = self.cfg.get('weather_display', '北京市')
             self._weather_text = self.weather.get_text() or '%s --' % name
         else:
             self._weather_text = ''
@@ -1523,6 +1538,8 @@ class TimeBar:
             menu.append(item)
 
         menu.append(Gtk.SeparatorMenuItem())
+        add('设置天气城市...', lambda w: self.on_set_weather_city())
+        menu.append(Gtk.SeparatorMenuItem())
         add('向左微调 20 像素', lambda w: self.nudge(-20))
         add('向右微调 20 像素', lambda w: self.nudge(20))
         menu.append(Gtk.SeparatorMenuItem())
@@ -1535,6 +1552,102 @@ class TimeBar:
         self.cfg[key] = item.get_active()
         save_config(self.cfg)
         self.relayout()
+
+    def on_set_weather_city(self):
+        """天气城市搜索对话框：输入城市/乡村名 -> 候选列表 -> 存 名称+坐标"""
+        dlg = Gtk.Dialog(title='设置天气城市', parent=self, flags=Gtk.DialogFlags.MODAL)
+        dlg.add_buttons('取消', Gtk.ResponseType.CANCEL, '保存', Gtk.ResponseType.OK)
+        dlg.set_default_size(420, 460)
+        box = dlg.get_content_area()
+        box.set_spacing(6)
+        box.set_margin_start(12); box.set_margin_end(12); box.set_margin_top(12); box.set_margin_bottom(12)
+
+        cur_name = str(self.cfg.get('weather_display', '北京市'))
+        cur_loc = str(self.cfg.get('weather_location', '北京市'))
+        pending = {}
+
+        ent = Gtk.Entry(text=cur_name)
+        btn = Gtk.Button(label='搜索')
+        row = Gtk.Box(spacing=8)
+        row.pack_start(Gtk.Label(label='城市/乡村'), False, False, 0)
+        row.pack_start(ent, True, True, 0)
+        row.pack_start(btn, False, False, 0)
+        box.pack_start(row, False, False, 0)
+
+        store = Gtk.ListStore(str, str, float, float)
+        tree = Gtk.TreeView(model=store)
+        tree.set_headers_visible(True)
+        tree.append_column(Gtk.TreeViewColumn('地名', Gtk.CellRendererText(), text=0))
+        tree.append_column(Gtk.TreeViewColumn('所属地区', Gtk.CellRendererText(), text=1))
+        sel = tree.get_selection()
+        sel.set_mode(Gtk.SelectionMode.SINGLE)
+
+        def on_selected(s):
+            model, it = s.get_selected()
+            if it:
+                pending.clear()
+                pending.update({'name': model[it][0], 'lat': model[it][2], 'lon': model[it][3]})
+                ent.set_text(model[it][0])
+        sel.connect('changed', on_selected)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.add(tree)
+        scroll.set_size_request(-1, 150)
+        box.pack_start(scroll, True, True, 0)
+
+        hint = Gtk.Label(label='支持城市与乡村（如：北京市 / 成都市 / 某某镇），选中后保存')
+        hint.set_line_wrap(True)
+        box.pack_start(hint, False, False, 0)
+
+        def do_search(*_a):
+            store.clear()
+            pending.clear()
+            q = ent.get_text().strip()
+            if not q:
+                return
+            btn.set_sensitive(False)
+            while Gtk.events_pending():
+                Gtk.main_iteration()
+            try:
+                results = []
+                for name in (q, self._strip_suffix(q)):   # 原样 -> 剥离行政后缀
+                    url = ('https://geocoding-api.open-meteo.com/v1/search?name=%s&count=10&language=zh'
+                           % urllib.parse.quote(name))
+                    data = self._json(url) or {}
+                    results = data.get('results') or []
+                    if results:
+                        break
+                for r in results:
+                    area = ' '.join(x for x in (r.get('admin1'), r.get('admin2'), r.get('admin3')) if x)
+                    store.append((r.get('name') or '', area,
+                                  r.get('latitude') or 0.0, r.get('longitude') or 0.0))
+            finally:
+                btn.set_sensitive(True)
+        btn.connect('clicked', do_search)
+        ent.connect('activate', do_search)
+        # 初始：当前坐标放入列表并选中（已是坐标格式时）
+        if ',' in cur_loc:
+            try:
+                a, b = cur_loc.split(',', 1)
+                store.append((cur_name, '当前设置', float(a), float(b)))
+                sel.select_iter(store.get_iter_first())
+            except Exception:
+                pass
+
+        box.show_all()
+        if dlg.run() == Gtk.ResponseType.OK:
+            new_name = ent.get_text().strip() or '北京市'
+            self.cfg['weather_display'] = new_name
+            if pending:
+                self.cfg['weather_location'] = '%s,%s' % (pending['lat'], pending['lon'])
+            elif new_name != cur_name:
+                self.cfg['weather_location'] = new_name
+            save_config(self.cfg)
+            self.weather.maybe_refresh(force=True)   # 立即用新城市刷新
+            self._weather_text = '%s 刷新中...' % new_name
+            self.da.queue_draw()
+        dlg.destroy()
 
     def change_scale(self, delta):
         self.set_scale(self.font_scale + delta)

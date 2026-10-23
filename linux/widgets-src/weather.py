@@ -33,44 +33,6 @@ def log(msg):
         f.write(time.strftime('%Y-%m-%d %H:%M:%S') + ' ' + str(msg) + '\n')
 
 
-class CityIndex:
-    """和风官方中国城市列表: 城市名 -> Location ID"""
-
-    def __init__(self):
-        self.map = {}
-        self.load()
-
-    def load(self):
-        p = os.path.join(USER_DIR, 'China-City-List.csv')
-        if not os.path.exists(p):
-            p = os.path.join(APP_DIR, 'China-City-List.csv')
-        try:
-            with open(p, encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or not line[0].isdigit():
-                        continue
-                    parts = line.split(',')
-                    if len(parts) > 2 and parts[2]:
-                        self.map[parts[2]] = parts[0]
-        except Exception as e:
-            log('city list load: ' + str(e))
-
-    def lookup(self, name):
-        name = (name or '').strip()
-        if not name:
-            return None
-        if name in self.map:
-            return self.map[name]
-        for suf in ('市', '地区', '盟', '州', '县', '区'):
-            if name.endswith(suf) and name[:-len(suf)] in self.map:
-                return self.map[name[:-len(suf)]]
-        for key, cid in self.map.items():
-            if name in key or key in name:
-                return cid
-        return None
-
-
 def load_config():
     cfg = {
         'x': None, 'y': None,
@@ -79,11 +41,9 @@ def load_config():
         'time_color': '#4A90D9',
         'weather_color': '#87CEEB',
         'forecast_color': '#87CEEB',
-        'city': '安宁市',
-        'location': '101290112',
-        'api_key': '',
-        'host': 'kq5u9t97c8.re.qweatherapi.com',
-        'auto_detect_city': False,
+        'city': '北京市',
+        'lat': None,
+        'lon': None,
         'lock_position': False,
         'show_forecast': False,
     }
@@ -185,45 +145,44 @@ class WeatherFetcher:
                 continue
         return s[:5]
 
-    # ─── 数据源1: 和风天气(心知替代) ───
-    def _qweather(self, path, loc, key):
-        url = ('https://%s/v7/%s?location=%s&key=%s' %
-               (self.cfg.get('host', 'kq5u9t97c8.re.qweatherapi.com'),
-                path, urllib.parse.quote(loc), key))
-        return self._http_get(url)
+    @staticmethod
+    def _strip_suffix(name):
+        """GeoNames 对「北京市」这类带行政后缀的词条常返回空，剥离后再试"""
+        for suf in ('特别行政区', '自治区', '地区', '盟', '自治州', '市', '县', '区'):
+            if name.endswith(suf) and len(name) > len(suf):
+                return name[:-len(suf)]
+        return name
 
-    def _fetch_qweather(self):
-        key = self.cfg.get('api_key', '')
-        if not key:
-            return None
-        data = self._qweather('weather/now', self.cfg.get('location', '101290112'), key)
-        if data.get('code') == '200':
-            now = data['now']
-            return {'text': now.get('text', ''),
-                    'temp': now.get('temp', ''),
-                    'feels': now.get('feelsLike', ''),
-                    'wind_dir': now.get('windDir', ''),
-                    'wind_scale': now.get('windScale', ''),
-                    'humidity': now.get('humidity', ''),
-                    'city': self.cfg.get('city', '')}
-        return None
+    def search_cities(self, query, count=10):
+        """城市/乡村名 -> 候选列表 [{name, area, lat, lon}]
 
-    def _fetch_qforecast(self):
-        key = self.cfg.get('api_key', '')
-        if not key:
-            return None
-        data = self._qweather('weather/7d', self.cfg.get('location', '101290112'), key)
-        if data.get('code') == '200':
-            days = []
-            for d in data.get('daily', [])[:7]:
-                days.append({'date': d.get('fxDate', ''),
-                             'text': d.get('textDay', ''),
-                             'tmax': d.get('tempMax', ''),
-                             'tmin': d.get('tempMin', '')})
-            self.forecast = days
-        return None
+        Open-Meteo geocoding 基于 GeoNames，覆盖到中国村级地名。
+        """
+        q = (query or '').strip()
+        if not q:
+            return []
+        results = None
+        for name in (q, self._strip_suffix(q)):     # 原样 -> 剥离行政后缀
+            try:
+                data = self._http_get('%s?name=%s&count=%d&language=zh' %
+                                      (self.GEO_URL, urllib.parse.quote(name), count))
+                results = data.get('results') or []
+            except Exception as e:
+                log('city search: ' + str(e))
+                return []
+            if results:
+                break
+        out = []
+        for r in results or []:
+            area = ' '.join(x for x in (r.get('admin1'), r.get('admin2'),
+                                        r.get('admin3')) if x)
+            out.append({'name': r.get('name') or '',
+                        'area': area,
+                        'lat': r.get('latitude'),
+                        'lon': r.get('longitude')})
+        return out
 
-    # ─── 数据源2: Open-Meteo (公共, 无需key) ───
+    # ─── 数据源1: Open-Meteo (公共免费, 无需key, 支持城市/乡村) ───
     def _geo_lookup(self):
         """城市名 -> 经纬度 (Open-Meteo geocoding, 结果写回配置缓存)"""
         if self._geo:
@@ -233,7 +192,7 @@ class WeatherFetcher:
         if lat is not None and lon is not None:
             self._geo = (float(lat), float(lon))
             return self._geo
-        city = self.cfg.get('city', '安宁市')
+        city = self.cfg.get('city', '北京市')
         for suf in ('市', '地区', '盟', '州', '县', '区'):
             if city.endswith(suf):
                 city = city[:-len(suf)]
@@ -298,7 +257,7 @@ class WeatherFetcher:
             self.forecast = days
         return now
 
-    # ─── 数据源3: wttr.in (公共, 无需key) ───
+    # ─── 数据源2: wttr.in (公共, 无需key) ───
     EN_DIR = {'N': '北', 'NNE': '东北偏北', 'NE': '东北', 'ENE': '东北偏东',
               'E': '东', 'ESE': '东南偏东', 'SE': '东南', 'SSE': '东南偏南',
               'S': '南', 'SSW': '西南偏南', 'SW': '西南', 'WSW': '西南偏西',
@@ -356,7 +315,7 @@ class WeatherFetcher:
             return None
 
     def _fetch_wttr(self):
-        city = urllib.parse.quote(self.cfg.get('city', '安宁市'))
+        city = urllib.parse.quote(self.cfg.get('city', '北京市'))
         url = 'https://wttr.in/%s?format=j1&lang=zh' % city
         data = self._http_get(url)
         cc = data.get('current_condition', [{}])[0]
@@ -393,11 +352,10 @@ class WeatherFetcher:
             self.forecast = days
         return now
 
-    # ─── 主流程: 自动切换 ───
+    # ─── 主流程: Open-Meteo 优先, wttr.in 兜底 ───
     def fetch(self):
         self.last_attempt = time.time()
-        for name, fn in (('和风天气', self._fetch_qweather),
-                         ('Open-Meteo', self._fetch_openmeteo),
+        for name, fn in (('Open-Meteo', self._fetch_openmeteo),
                          ('wttr.in', self._fetch_wttr)):
             try:
                 now = fn()
@@ -415,8 +373,7 @@ class WeatherFetcher:
         return None
 
     def fetch_forecast(self):
-        for name, fn in (('和风天气', self._fetch_qforecast),
-                         ('Open-Meteo', self._fetch_openmeteo),
+        for name, fn in (('Open-Meteo', self._fetch_openmeteo),
                          ('wttr.in', self._fetch_wttr)):
             try:
                 self.forecast = None
@@ -483,7 +440,6 @@ class WidgetWindow(Gtk.Window):
         self.set_can_focus(False)
 
         self.weather = WeatherFetcher(self.cfg)
-        self.cities = CityIndex()
 
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -902,62 +858,100 @@ class WidgetWindow(Gtk.Window):
     def on_settings(self, widget):
         dlg = Gtk.Dialog(title='挂件设置', parent=self, flags=Gtk.DialogFlags.MODAL)
         dlg.add_buttons('取消', Gtk.ResponseType.CANCEL, '保存', Gtk.ResponseType.OK)
+        dlg.set_default_size(440, 520)
         box = dlg.get_content_area()
         box.set_spacing(6)
         box.set_margin_start(12); box.set_margin_end(12); box.set_margin_top(12); box.set_margin_bottom(12)
 
-        city_ent = Gtk.Entry(text=self.cfg.get('city', '安宁市'))
-        key_ent = Gtk.Entry(text=self.cfg.get('api_key', ''))
-        host_ent = Gtk.Entry(text=self.cfg.get('host', 'kq5u9t97c8.re.qweatherapi.com'))
-        loc_ent = Gtk.Entry(text=self.cfg.get('location', '101290112'))
+        # ── 城市/乡村搜索区 ──
+        old_city = self.cfg.get('city', '北京市')
+        old_lat, old_lon = self.cfg.get('lat'), self.cfg.get('lon')
+        pending = {}          # 待保存的选中结果 {name, lat, lon}
+
+        city_ent = Gtk.Entry(text=old_city)
+        search_btn = Gtk.Button(label='搜索')
+        srow = Gtk.Box(spacing=8)
+        srow.pack_start(Gtk.Label(label='城市/乡村'), False, False, 0)
+        srow.pack_start(city_ent, True, True, 0)
+        srow.pack_start(search_btn, False, False, 0)
+        box.pack_start(srow, False, False, 0)
+
+        store = Gtk.ListStore(str, str, float, float)   # 地名 | 所属地区 | lat | lon
+        tree = Gtk.TreeView(model=store)
+        tree.set_headers_visible(True)
+        tree.append_column(Gtk.TreeViewColumn('地名', Gtk.CellRendererText(), text=0))
+        tree.append_column(Gtk.TreeViewColumn('所属地区', Gtk.CellRendererText(), text=1))
+        sel = tree.get_selection()
+        sel.set_mode(Gtk.SelectionMode.SINGLE)
+
+        def on_selected(s):
+            model, it = s.get_selected()
+            if it:
+                pending.clear()
+                pending.update({'name': model[it][0], 'lat': model[it][2], 'lon': model[it][3]})
+                city_ent.set_text(model[it][0])
+        sel.connect('changed', on_selected)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.add(tree)
+        scroll.set_size_request(-1, 150)
+        box.pack_start(scroll, True, True, 0)
+
+        hint = Gtk.Label(label='输入城市或乡村名（如：北京市 / 成都市 / 某某镇），点搜索后在列表中选择')
+        hint.set_line_wrap(True)
+        hint.get_style_context().add_class('dim-label')
+        box.pack_start(hint, False, False, 0)
+
+        def do_search(*_a):
+            store.clear()
+            pending.clear()
+            q = city_ent.get_text().strip()
+            if not q:
+                return
+            search_btn.set_sensitive(False)
+            while Gtk.events_pending():
+                Gtk.main_iteration()
+            try:
+                for r in self.weather.search_cities(q):
+                    store.append((r['name'], r['area'], r['lat'] or 0.0, r['lon'] or 0.0))
+            finally:
+                search_btn.set_sensitive(True)
+        search_btn.connect('clicked', do_search)
+        city_ent.connect('activate', do_search)
+        # 初始：把当前配置的城市放入列表并选中（已有坐标时）
+        if old_lat is not None and old_lon is not None:
+            store.append((old_city, '当前设置', float(old_lat), float(old_lon)))
+            sel.select_iter(store.get_iter_first())
+
+        # ── 字号 / 颜色 ──
         size_adj = Gtk.Adjustment(value=float(self.cfg.get('font_size', BASE_FONT_SIZE)), lower=16, upper=96, step_increment=2)
         size_spin = Gtk.SpinButton(adjustment=size_adj)
         color_ent = Gtk.Entry(text=self.cfg.get('color', '#FFEB3B'))
         time_color_ent = Gtk.Entry(text=self.cfg.get('time_color', '#4A90D9'))
         weather_color_ent = Gtk.Entry(text=self.cfg.get('weather_color', '#87CEEB'))
         forecast_color_ent = Gtk.Entry(text=self.cfg.get('forecast_color', '#87CEEB'))
-        row1 = Gtk.Box(spacing=8); row1.pack_start(Gtk.Label(label='城市'), False, False, 0); row1.pack_start(city_ent, True, True, 0)
-        row2 = Gtk.Box(spacing=8); row2.pack_start(Gtk.Label(label='和风API Key'), False, False, 0); row2.pack_start(key_ent, True, True, 0)
-        row3 = Gtk.Box(spacing=8); row3.pack_start(Gtk.Label(label='Host'), False, False, 0); row3.pack_start(host_ent, True, True, 0)
-        row4 = Gtk.Box(spacing=8); row4.pack_start(Gtk.Label(label='Location(城市ID/经纬度)'), False, False, 0); row4.pack_start(loc_ent, True, True, 0)
-        row5 = Gtk.Box(spacing=8); row5.pack_start(Gtk.Label(label='字号'), False, False, 0); row5.pack_start(size_spin, True, True, 0)
-        row6 = Gtk.Box(spacing=8); row6.pack_start(Gtk.Label(label='年月日星期农历颜色(#RRGGBB)'), False, False, 0); row6.pack_start(color_ent, True, True, 0)
-        row7 = Gtk.Box(spacing=8); row7.pack_start(Gtk.Label(label='时间颜色(#RRGGBB)'), False, False, 0); row7.pack_start(time_color_ent, True, True, 0)
-        row8 = Gtk.Box(spacing=8); row8.pack_start(Gtk.Label(label='天气颜色(#RRGGBB)'), False, False, 0); row8.pack_start(weather_color_ent, True, True, 0)
-        row9 = Gtk.Box(spacing=8); row9.pack_start(Gtk.Label(label='一周天气颜色(#RRGGBB)'), False, False, 0); row9.pack_start(forecast_color_ent, True, True, 0)
+        row_size = Gtk.Box(spacing=8); row_size.pack_start(Gtk.Label(label='字号'), False, False, 0); row_size.pack_start(size_spin, True, True, 0)
+        row_c1 = Gtk.Box(spacing=8); row_c1.pack_start(Gtk.Label(label='年月日星期农历颜色(#RRGGBB)'), False, False, 0); row_c1.pack_start(color_ent, True, True, 0)
+        row_c2 = Gtk.Box(spacing=8); row_c2.pack_start(Gtk.Label(label='时间颜色(#RRGGBB)'), False, False, 0); row_c2.pack_start(time_color_ent, True, True, 0)
+        row_c3 = Gtk.Box(spacing=8); row_c3.pack_start(Gtk.Label(label='天气颜色(#RRGGBB)'), False, False, 0); row_c3.pack_start(weather_color_ent, True, True, 0)
+        row_c4 = Gtk.Box(spacing=8); row_c4.pack_start(Gtk.Label(label='一周天气颜色(#RRGGBB)'), False, False, 0); row_c4.pack_start(forecast_color_ent, True, True, 0)
+        for r in (row_size, row_c1, row_c2, row_c3, row_c4):
+            box.pack_start(r, False, False, 0)
         fc_chk = Gtk.CheckButton(label='显示一周天气')
         fc_chk.set_active(bool(self.cfg.get('show_forecast', False)))
-        box.pack_start(row1, False, False, 0)
-        box.pack_start(row2, False, False, 0)
-        box.pack_start(row3, False, False, 0)
-        box.pack_start(row4, False, False, 0)
-        box.pack_start(row5, False, False, 0)
-        box.pack_start(row6, False, False, 0)
-        box.pack_start(row7, False, False, 0)
-        box.pack_start(row8, False, False, 0)
-        box.pack_start(row9, False, False, 0)
         box.pack_start(fc_chk, False, False, 0)
         box.show_all()
         if dlg.run() == Gtk.ResponseType.OK:
-            old_city = self.cfg.get('city', '安宁市')
-            old_loc = self.cfg.get('location', '101290112')
-            new_city = city_ent.get_text().strip() or '安宁市'
+            new_city = city_ent.get_text().strip() or '北京市'
             self.cfg['city'] = new_city
-            self.cfg['api_key'] = key_ent.get_text().strip()
-            self.cfg['host'] = host_ent.get_text().strip() or 'kq5u9t97c8.re.qweatherapi.com'
-            new_loc = loc_ent.get_text().strip()
-            if new_loc and new_loc != old_loc:
-                self.cfg['location'] = new_loc
-            else:
-                cid = self.cities.lookup(new_city)
-                if cid:
-                    self.cfg['location'] = cid
-                else:
-                    msg = Gtk.MessageDialog(parent=self, flags=Gtk.DialogFlags.MODAL,
-                                            type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.OK,
-                                            message_format='未找到城市「%s」,请在 Location 栏手动填写和风城市ID' % new_city)
-                    msg.run()
-                    msg.destroy()
+            if pending:
+                self.cfg['lat'] = pending['lat']
+                self.cfg['lon'] = pending['lon']
+            elif new_city != old_city:
+                # 换了城市名但没选候选：清坐标，按新名字重新查找
+                self.cfg['lat'] = None
+                self.cfg['lon'] = None
             self.cfg['font_size'] = int(size_spin.get_value())
             self.cfg['show_forecast'] = fc_chk.get_active()
             col = color_ent.get_text().strip()
@@ -972,6 +966,7 @@ class WidgetWindow(Gtk.Window):
             fcol = forecast_color_ent.get_text().strip()
             if re.match(r'^#[0-9A-Fa-f]{6}$', fcol):
                 self.cfg['forecast_color'] = fcol
+            self.weather._geo = None          # 清地理缓存，强制重新解析
             self.apply_style()
             self.update_time()
             self.save_config()
