@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed class SettingsStore
 {
@@ -15,7 +15,7 @@ public sealed class SettingsStore
     {
         FilePath = filePath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "XiaoPuHeWeather",
+            "WeatherWidget48",
             "settings.json");
     }
 

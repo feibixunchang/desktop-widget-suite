@@ -1,8 +1,8 @@
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public static class AppIconProvider
 {
-    public const string EmbeddedResourceName = "XiaoPuHeWeather.Assets.weather.ico";
+    public const string EmbeddedResourceName = "WeatherWidget48.Assets.weather.ico";
 
     public static Icon Load()
     {

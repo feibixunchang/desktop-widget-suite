@@ -8,9 +8,12 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AssemblyName>WidgetHubSetup</AssemblyName>
-    <AssemblyTitle>桌面挂件总管 安装程序</AssemblyTitle>
-    <Product>桌面挂件总管</Product>
+    <AssemblyTitle>桌面挂件合集 安装程序</AssemblyTitle>
+    <Product>桌面挂件合集</Product>
     <RootNamespace>WidgetHubSetup</RootNamespace>
+    <Version>1.6.0</Version>
+    <AssemblyVersion>1.6.0.0</AssemblyVersion>
+    <FileVersion>1.6.0.0</FileVersion>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Microsoft.CSharp" />
@@ -18,7 +21,7 @@
     <Reference Include="System.IO.Compression.FileSystem" />
   </ItemGroup>
   <ItemGroup>
-    <!-- 由 build_package.cmd 生成：把 WidgetHub + 10 个挂件打包成 payload.zip -->
+    <!-- 由 build_package.cmd 生成：把 WidgetHub + 13 个挂件打包成 payload.zip -->
     <EmbeddedResource Include="payload.zip" LogicalName="payload.zip" Condition="Exists('payload.zip')" />
   </ItemGroup>
 </Project>

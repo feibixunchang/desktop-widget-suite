@@ -1,7 +1,7 @@
 @echo off
 rem ==========================================================
-rem  WidgetHub - add Microsoft Defender exclusions
-rem  The 10 widgets are unsigned small programs; Defender may
+rem  桌面挂件合集 - add Microsoft Defender exclusions
+rem  The 13 widgets are unsigned small programs; Defender may
 rem  misjudge them as PUA and delete them. This script adds
 rem  safe exclusions for the WidgetHub install folders.
 rem  (Run as administrator is required.)
@@ -25,7 +25,7 @@ set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\DesktopVideo
 set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\DesktopWallet
 set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\RssWidget
 set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\NeonMouseTrail
-set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\XiaoPuHeWeather
+set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\WeatherWidget48
 set TARGETS=%TARGETS%;%USERPROFILE%\Documents\WidgetHub
 
 echo Adding Defender exclusions...

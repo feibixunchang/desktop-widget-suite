@@ -1,18 +1,14 @@
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public static class LocationCatalog
 {
     private static readonly IReadOnlyList<GeoLocation> Locations = new[]
     {
-        new GeoLocation("安宁市", "云南省昆明市", "安宁市太平新城", "中国", 24.8925, 102.5695),
         new GeoLocation("北京", "北京市", "北京市", "中国", 39.9075, 116.39723),
         new GeoLocation("上海", "上海市", "上海市", "中国", 31.22222, 121.45806),
         new GeoLocation("广州", "广东", "广州市", "中国", 23.12911, 113.26438),
         new GeoLocation("深圳", "广东", "深圳市", "中国", 22.54554, 114.06830),
         new GeoLocation("成都", "四川", "成都市", "中国", 30.66667, 104.06667),
-        new GeoLocation("昆明", "云南", "昆明市", "中国", 25.03889, 102.71833),
-        new GeoLocation("安宁市太平新城", "云南省昆明市", "安宁市太平新城", "中国", 24.9517922, 102.5807247),
-        new GeoLocation("安宁", "云南省昆明市", "安宁市", "中国", 25.04000, 102.42000),
         new GeoLocation("杭州", "浙江", "杭州市", "中国", 30.27415, 120.15515),
         new GeoLocation("南京", "江苏", "南京市", "中国", 32.06025, 118.79688),
         new GeoLocation("武汉", "湖北", "武汉市", "中国", 30.59285, 114.30549),
@@ -57,9 +53,7 @@ public static class LocationCatalog
         return Locations
             .Where(location => location.Name.ContainsOrdinal(normalized)
                 || location.Admin1.ContainsOrdinal(normalized)
-                || location.Admin2.ContainsOrdinal(normalized)
-                || (normalized is "安宁市" or "安宁市村"
-                    && location.Name == "安宁市"))
+                || location.Admin2.ContainsOrdinal(normalized))
             .OrderByDescending(location => string.Equals(location.Name, normalized, StringComparison.Ordinal))
             .ThenBy(location => location.Name, StringComparer.Ordinal)
             .ToArray();

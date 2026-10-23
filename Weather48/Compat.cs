@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 // net48 兼容垫片：把 net6+/net8 时代才有的 API 补上，
-// 这样安宁市天气挂件可以跟其它 9 个挂件一样直接跑在 .NET Framework 4.8 上，
+// 这样桌面天气小挂件可以跟其它 12 个挂件一样直接跑在 .NET Framework 4.8 上，
 // 目标电脑不需要再装 .NET 运行时。
 internal static class Compat
 {
@@ -30,7 +30,7 @@ internal static class Compat
                 if (!string.IsNullOrEmpty(path)) return path!;
             }
             catch { }
-            return System.Reflection.Assembly.GetEntryAssembly()?.Location ?? "XiaoPuHeWeather.exe";
+            return System.Reflection.Assembly.GetEntryAssembly()?.Location ?? "WeatherWidget48.exe";
         }
     }
 }

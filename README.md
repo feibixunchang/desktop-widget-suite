@@ -1,6 +1,6 @@
 # 桌面挂件合集 · WidgetHub
 
-把 10 个桌面挂件收进**一个托盘图标**、用一个窗口统一管理，并打包成**一个 2.7MB 的安装包**，
+把 13 个桌面挂件收进**一个托盘图标**、用一个窗口统一管理，并打包成**一个 2.7MB 的安装包**，
 目标电脑**不需要装任何 .NET 运行时**（全部编译成 .NET Framework 4.8，Windows 自带）。
 
 > 仓库名必须是 ASCII：GitHub 会把仓库名里的中文全部剥掉（`abc桌面挂件合集def` → `abc-def`），
@@ -12,12 +12,12 @@
 
 | 能力 | 说明 |
 |---|---|
-| 统一托盘 | 10 个挂件在源码/IL 层去掉了各自的托盘图标，托盘里只剩 WidgetHub 一个 |
+| 统一托盘 | 13 个挂件在源码/IL 层去掉了各自的托盘图标，托盘里只剩 WidgetHub 一个 |
 | 位置记忆 | 「位置记忆」按钮记录挂件窗口坐标；停止/启动后自动摆回原位 |
 | 桌面层 | 默认沉到桌面层（壁纸之上、程序之下），打开任何程序都不会被遮挡；可按挂件切「置顶」 |
 | 每挂件设置 | 表格里每个挂件都有「设置」按钮，直接读写该挂件自己的配置文件（字号/透明度/贴桌面层/音量…） |
 | 拖尾特效 | 鼠标拖尾的 10 种特效、8 种配色、3 档性能，直接在管理器里切换 |
-| 版本与更新 | 头部显示 `v1.0`（点它打开「关于·设置」），可检查 GitHub Release 新版并一键下载安装 |
+| 版本与更新 | 头部显示 `v1.6`（点它打开「关于·设置」），可检查 GitHub Release 新版并一键下载安装 |
 | 卸载 | 控制面板「程序和功能」里可卸载，也可在开始菜单/托盘里卸载 |
 | 安全软件 | 安装包自带 `Defender-Exclude.bat`，一键给 Defender 加排除项（避免未签名小工具被误删） |
 
@@ -43,7 +43,7 @@ dotnet publish WidgetHub/WidgetHub.csproj -c Release -o WidgetHub/publish48
 # 卸载器
 dotnet publish installer/WidgetHubUninstall/WidgetHubUninstall.csproj -c Release -o installer/WidgetHubUninstall/out
 
-# 打包负载（管理器 + 10 个挂件 → payload.zip）
+# 打包负载（管理器 + 13 个挂件 → payload.zip）
 dotnet run --project tools/Diagnostics -c Release -- --pack \
   <WidgetHub/publish48> <%LOCALAPPDATA%/Programs> <stage> <installer/WidgetHubSetup/payload.zip>
 
@@ -57,7 +57,7 @@ dotnet publish installer/WidgetHubSetup/WidgetHubSetup.csproj -c Release -o inst
 
 ```bash
 export GITHUB_TOKEN=你的PAT        # 需要 repo 权限（私有仓库）
-bash release.sh 1.1                # 改版本号 → 构建 → 提交 → 推送 → 打 tag → 发 Release
+bash release.sh 1.6                # 改版本号 → 构建 → 提交 → 推送 → 打 tag → 发 Release
 ```
 
 发布后，已经安装的用户在管理器里点右上角版本号 →「检查更新」就能看到新版本并一键升级。
@@ -79,7 +79,7 @@ bash release.sh 1.1                # 改版本号 → 构建 → 提交 → 推�
 仓库同时维护 Linux 版本，目标与第一版 `v1.0` Release **并列提供 Windows 与 Linux 两种安装包**：
 
 - **Windows**：`WidgetHubSetup.exe`（见上方「发布新版本」）
-- **Linux**：`linux/dist/desktop-widgets-suite_2.9.74_all.deb`
+- **Linux**：`linux/dist/desktop-widgets-suite_2.9.84_all.deb`
 
 Linux 端同样贯彻「一个软件统管全部桌面挂件」的理念：
 

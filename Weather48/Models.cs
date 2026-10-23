@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed record GeoLocation(
     string Name,
@@ -10,7 +10,7 @@ public sealed record GeoLocation(
     double Latitude,
     double Longitude)
 {
-    public static GeoLocation Default => new("安宁市", "云南省昆明市", "安宁市太平新城", "中国", 24.8925, 102.5695);
+    public static GeoLocation Default => new("北京市", "北京市", "北京市", "中国", 39.9042, 116.4074);
 
     public bool HasValidCoordinates =>
         Compat.IsFinite(Latitude) && Latitude is >= -90 and <= 90

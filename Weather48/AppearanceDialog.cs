@@ -1,4 +1,4 @@
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed class AppearanceDialog : Form
 {
@@ -65,7 +65,7 @@ public sealed class AppearanceDialog : Form
             AutoEllipsis = false,
             AutoSize = false,
             Dock = DockStyle.Fill,
-            Text = "第一行：安宁市　多云　25\u2103　湿度 42%　西南风 9km/h",
+            Text = "第一行：北京市　多云　25\u2103　湿度 42%　西南风 9km/h",
             TextAlign = ContentAlignment.MiddleCenter
         };
         _secondLinePreview = new Label

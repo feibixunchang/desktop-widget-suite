@@ -7,7 +7,10 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AssemblyName>WidgetHubUninstall</AssemblyName>
-    <AssemblyTitle>桌面挂件总管 卸载程序</AssemblyTitle>
+    <AssemblyTitle>桌面挂件合集 卸载程序</AssemblyTitle>
     <RootNamespace>WidgetHubUninstall</RootNamespace>
+    <Version>1.6.0</Version>
+    <AssemblyVersion>1.6.0.0</AssemblyVersion>
+    <FileVersion>1.6.0.0</FileVersion>
   </PropertyGroup>
 </Project>

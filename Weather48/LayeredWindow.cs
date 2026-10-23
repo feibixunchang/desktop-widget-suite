@@ -2,7 +2,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 internal static class LayeredWindow
 {

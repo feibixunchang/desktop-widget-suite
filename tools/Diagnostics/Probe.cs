@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
-// 坐标探针：验证「DPI 感知的管理器」如何把那 10 个 DPI 不感知的挂件窗口摆到目标物理坐标。
+// 坐标探针：验证「DPI 感知的管理器」如何把那 13 个 DPI 不感知的挂件窗口摆到目标物理坐标。
 // 对每个候选换算方式实测，打印窗口真实物理落点，找出唯一有效的那种。
 internal static class Probe
 {

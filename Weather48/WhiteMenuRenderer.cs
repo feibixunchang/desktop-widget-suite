@@ -1,4 +1,4 @@
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed class WhiteMenuRenderer : ToolStripProfessionalRenderer
 {

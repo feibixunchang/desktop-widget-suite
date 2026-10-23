@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed class DismissibleContextMenuStrip : ContextMenuStrip
 {

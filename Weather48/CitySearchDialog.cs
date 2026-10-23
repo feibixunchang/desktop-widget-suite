@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed class CitySearchDialog : Form
 {
@@ -146,7 +146,7 @@ public sealed class CitySearchDialog : Form
         var okButton = CreateButton("确定并刷新", 120);
         var cancelButton = CreateButton("取消", 90);
         cancelButton.DialogResult = DialogResult.Cancel;
-        var defaultButton = CreateButton("恢复安宁市", 120);
+        var defaultButton = CreateButton("恢复默认地点", 120);
         applyButton.Click += async (_, _) => await ApplyLocationAsync();
         okButton.Click += async (_, _) => await ApplyLocationAsync();
         defaultButton.Click += (_, _) => SetLocation(GeoLocation.Default);
@@ -258,9 +258,7 @@ public sealed class CitySearchDialog : Form
         {
             var localResults = LocationCatalog.Search(query);
             var exactLocalResult = localResults.FirstOrDefault(location =>
-                string.Equals(location.Name, query, StringComparison.Ordinal)
-                || (query is "安宁市" or "安宁市村"
-                    && location.Name == "安宁市"));
+                string.Equals(location.Name, query, StringComparison.Ordinal));
             if (exactLocalResult is not null)
             {
                 SetSearchResults(new[] { exactLocalResult }, $"已使用内置地点：{exactLocalResult.DisplayName}");

@@ -49,7 +49,7 @@ namespace WidgetHubSetup
     {
         public static readonly SkinDef[] All =
         {
-            new SkinDef { Name = "安宁市天气", Sub = "XiaoPuHeWeather", Exe = "XiaoPuHeWeather.exe" },
+            new SkinDef { Name = "北京市天气", Sub = "WeatherWidget48", Exe = "WeatherWidget48.exe" },
             new SkinDef { Name = "桌面万年历", Sub = "DesktopCalendar", Exe = "DesktopCalendar.exe" },
             new SkinDef { Name = "天气CPU网速", Sub = "DesktopMonitor", Exe = "DesktopMonitor.exe" },
             new SkinDef { Name = "桌面音乐", Sub = "DesktopMusic", Exe = "DesktopMusic.exe" },
@@ -58,6 +58,9 @@ namespace WidgetHubSetup
             new SkinDef { Name = "桌面视频", Sub = "DesktopVideo", Exe = "DesktopVideo.exe" },
             new SkinDef { Name = "桌面记账", Sub = "DesktopWallet", Exe = "DesktopWallet.exe" },
             new SkinDef { Name = "桌面RSS", Sub = "RssWidget", Exe = "RssWidget.exe" },
+            new SkinDef { Name = "桌面记事", Sub = "DesktopNotes", Exe = "DesktopNotes.exe" },
+            new SkinDef { Name = "桌面相框", Sub = "DesktopPhoto", Exe = "DesktopPhoto.exe" },
+            new SkinDef { Name = "桌面阴历", Sub = "DesktopLunar", Exe = "DesktopLunar.exe" },
             new SkinDef { Name = "炫彩鼠标尾巴", Sub = "NeonMouseTrail", Exe = "NeonMouseTrail.exe", Positionless = true },
         };
     }
@@ -92,7 +95,7 @@ namespace WidgetHubSetup
 
         public SetupForm()
         {
-            Text = "桌面挂件总管 · 安装向导";
+            Text = "桌面挂件合集 · 安装向导";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -132,8 +135,8 @@ namespace WidgetHubSetup
                 using var f1 = new Font("Microsoft YaHei", 17F, FontStyle.Bold);
                 using var f2 = new Font("Microsoft YaHei", 9F);
                 using var sb = new SolidBrush(Color.FromArgb(226, 236, 255));
-                g.DrawString("桌面挂件总管", f1, Brushes.White, PX(96), PX(24));
-                g.DrawString("WidgetHub · 10 个桌面挂件 + 一个统一托盘图标", f2, sb, PX(98), PX(62));
+                g.DrawString("桌面挂件合集", f1, Brushes.White, PX(96), PX(24));
+                g.DrawString("桌面挂件合集 · 13 个桌面挂件 + 一个统一托盘图标", f2, sb, PX(98), PX(62));
             };
 
             // ---------- 底部操作区（Dock=Bottom，永远贴在窗口底边）----------
@@ -174,7 +177,7 @@ namespace WidgetHubSetup
             };
             lblSub = new Label
             {
-                Text = "把 1 个管理程序 + 10 个挂件装到同一目录，并生成开始菜单快捷方式。无需安装任何运行库。",
+                Text = "把 1 个管理程序 + 13 个挂件装到同一目录，并生成开始菜单快捷方式。无需安装任何运行库。",
                 ForeColor = CMuted,
                 AutoSize = false,
                 Size = new Size(ContentWidth(), PX(40)),
@@ -294,10 +297,10 @@ namespace WidgetHubSetup
                     if (installed)
                     {
                         lblStatus.Text = "安装完成";
-                        btnInstall.Text = "启动桌面挂件总管";
+                        btnInstall.Text = "启动桌面挂件合集";
                         btnInstall.Enabled = true;
                         btnInstall.Fill = CBlueD;
-                        lblDetail.Text = "已安装 1 个管理程序 + 10 个挂件。托盘里只会出现 WidgetHub 一个图标。";
+                        lblDetail.Text = "已安装 1 个管理程序 + 13 个挂件。托盘里只会出现桌面挂件合集一个图标。";
                     }
                     else
                     {
@@ -456,23 +459,23 @@ namespace WidgetHubSetup
         {
             string exe = Path.Combine(TargetDir, "WidgetHub", "WidgetHub.exe");
             string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),
-                "桌面挂件总管", "桌面挂件总管.lnk");
+                "桌面挂件合集", "桌面挂件合集.lnk");
             Directory.CreateDirectory(Path.GetDirectoryName(startMenu)!);
-            CreateShortcut(startMenu, exe, "桌面挂件总管");
+            CreateShortcut(startMenu, exe, "桌面挂件合集");
 
             if (chkDesktop.Checked)
             {
                 string desk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-                    "桌面挂件总管.lnk");
-                CreateShortcut(desk, exe, "桌面挂件总管");
+                    "桌面挂件合集.lnk");
+                CreateShortcut(desk, exe, "桌面挂件合集");
             }
 
             // 卸载入口：开始菜单里一个"卸载"快捷方式 + 安装目录里的 Uninstall.bat
             string uninstaller = Path.Combine(TargetDir, "Uninstall", "WidgetHubUninstall.exe");
             if (File.Exists(uninstaller))
             {
-                string unLink = Path.Combine(Path.GetDirectoryName(startMenu)!, "卸载桌面挂件总管.lnk");
-                CreateShortcut(unLink, uninstaller, "卸载桌面挂件总管");
+                string unLink = Path.Combine(Path.GetDirectoryName(startMenu)!, "卸载桌面挂件合集.lnk");
+                CreateShortcut(unLink, uninstaller, "卸载桌面挂件合集");
                 File.WriteAllText(Path.Combine(TargetDir, "Uninstall.bat"),
                     "@echo off\r\n\"" + uninstaller + "\"\r\n", new UTF8Encoding(false));
             }
@@ -489,9 +492,9 @@ namespace WidgetHubSetup
                 using var key = Registry.CurrentUser.CreateSubKey(
                     @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WidgetHub");
                 if (key == null) return;
-                key.SetValue("DisplayName", "桌面挂件总管");
-                key.SetValue("DisplayVersion", "1.0.0");
-                key.SetValue("Publisher", "WidgetHub");
+                key.SetValue("DisplayName", "桌面挂件合集");
+                key.SetValue("DisplayVersion", "1.6.0");
+                key.SetValue("Publisher", "桌面挂件合集");
                 key.SetValue("DisplayIcon", exe);
                 key.SetValue("InstallLocation", TargetDir);
                 key.SetValue("UninstallString", "\"" + uninstaller + "\"");

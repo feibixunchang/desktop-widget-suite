@@ -16,7 +16,7 @@ cd "$HERE"
 DOTNET="/c/Program Files/dotnet/dotnet.exe"
 REPO_OWNER="feibixunchang"
 REPO_NAME="desktop-widget-suite"
-TAG="v$VER"
+TAG="win-v$VER"
 
 echo "==> 1/6 更新版本号 -> $TAG"
 "$DOTNET" --version >/dev/null
@@ -56,7 +56,7 @@ ASSET_NAME="WidgetHubSetup.exe"
 BODY=$(cat << EOF
 桌面挂件合集 WidgetHub $TAG
 
-* 10 个桌面挂件 + 统一托盘图标
+* 13 个桌面挂件 + 统一托盘图标
 * 目标电脑无需安装任何 .NET 运行时
 * 安装包：$ASSET_NAME（约 $(du -m "WidgetHubSetup-$TAG.exe" | cut -f1)MB）
 

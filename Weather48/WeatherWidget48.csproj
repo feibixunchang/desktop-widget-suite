@@ -8,14 +8,14 @@
     <LangVersion>latest</LangVersion>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
-    <AssemblyName>XiaoPuHeWeather</AssemblyName>
-    <RootNamespace>XiaoPuHeWeather</RootNamespace>
+    <AssemblyName>WeatherWidget48</AssemblyName>
+    <RootNamespace>WeatherWidget48</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.6</Version>
-    <AssemblyVersion>1.0.6.0</AssemblyVersion>
-    <FileVersion>1.0.6.0</FileVersion>
-    <Product>安宁市天气挂件</Product>
-    <AssemblyTitle>安宁市天气挂件</AssemblyTitle>
+    <Version>1.0.7</Version>
+    <AssemblyVersion>1.0.7.0</AssemblyVersion>
+    <FileVersion>1.0.7.0</FileVersion>
+    <Product>桌面天气小挂件</Product>
+    <AssemblyTitle>桌面天气小挂件</AssemblyTitle>
     <Description>使用 Open-Meteo 免费公共 API 的 Windows 桌面天气挂件</Description>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>

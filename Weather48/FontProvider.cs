@@ -1,6 +1,6 @@
 using System.Drawing.Text;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public static class FontProvider
 {

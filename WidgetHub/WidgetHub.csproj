@@ -10,7 +10,11 @@
     <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>WidgetHub</AssemblyName>
-    <AssemblyTitle>WidgetHub 桌面挂件统一管理器</AssemblyTitle>
+    <AssemblyTitle>桌面挂件合集 桌面挂件统一管理器</AssemblyTitle>
+    <Version>1.6.0</Version>
+    <AssemblyVersion>1.6.0.0</AssemblyVersion>
+    <FileVersion>1.6.0.0</FileVersion>
+    <Product>桌面挂件合集</Product>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>

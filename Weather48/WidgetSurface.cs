@@ -3,7 +3,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Drawing.Text;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed class WidgetSurface : IDisposable
 {

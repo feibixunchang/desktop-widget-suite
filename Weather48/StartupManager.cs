@@ -1,11 +1,11 @@
 using Microsoft.Win32;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed class StartupManager
 {
     private const string DefaultRunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string DefaultValueName = "XiaoPuHeWeather";
+    private const string DefaultValueName = "WeatherWidget48";
     private readonly string _runKeyPath;
     private readonly string _valueName;
 

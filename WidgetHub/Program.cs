@@ -53,7 +53,7 @@ namespace WidgetHub
     /// <summary>版本与更新源信息。</summary>
     public static class AppInfo
     {
-        public const string Version = "1.0";
+        public const string Version = "1.6";
         public const string DisplayName = "桌面挂件合集";
         public const string RepoOwner = "feibixunchang";
         // GitHub 不允许仓库名带中文（会被剥成空），所以仓库用 ASCII 名，中文名放在描述/README
@@ -190,8 +190,8 @@ namespace WidgetHub
             string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string exe = s.ExeName ?? "";
 
-            // 5 个共用 Shared/WidgetForm 的挂件：同一套 schema
-            string[] shared = { "DesktopCalendar", "DesktopTimer", "DesktopVideo", "DesktopWallet", "RssWidget" };
+            // 7 个共用 Shared/WidgetForm 的挂件：同一套 schema
+            string[] shared = { "DesktopCalendar", "DesktopTimer", "DesktopVideo", "DesktopWallet", "RssWidget", "DesktopNotes", "DesktopPhoto" };
             if (Array.IndexOf(shared, s.Folder) >= 0 || shared.Any(x => exe.StartsWith(x, StringComparison.OrdinalIgnoreCase)))
             {
                 return new Profile
@@ -209,11 +209,11 @@ namespace WidgetHub
                 };
             }
 
-            if (exe.IndexOf("XiaoPuHeWeather", StringComparison.OrdinalIgnoreCase) >= 0)
+            if (exe.IndexOf("WeatherWidget48", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return new Profile
                 {
-                    ConfigPath = Path.Combine(local, "XiaoPuHeWeather", "settings.json"),
+                    ConfigPath = Path.Combine(local, "WeatherWidget48", "settings.json"),
                     Defs = new List<SettingDef>
                     {
                         Num("FirstLineFontSize", "主行字号", 12, 48),
@@ -534,7 +534,7 @@ namespace WidgetHub
     {
         public bool AutoStartManager { get; set; } = false;
         public string UpdateToken { get; set; } = "";      // 私有仓库的更新令牌（可选）
-        public bool HideWidgetTrayIcons { get; set; } = false;  // 旧版兜底，10 个挂件已从源码/IL 层去托盘，默认关闭
+        public bool HideWidgetTrayIcons { get; set; } = false;  // 旧版兜底，13 个挂件已从源码/IL 层去托盘，默认关闭
         public List<Skin> Skins { get; set; } = new();
 
         public static string Path_ =>
@@ -580,7 +580,7 @@ namespace WidgetHub
         {
             var skins = new List<Skin>
             {
-                new() { Name = "安宁市天气",     Folder = "XiaoPuHeWeather", ExeName = "XiaoPuHeWeather.exe" },
+                new() { Name = "北京市天气",     Folder = "WeatherWidget48", ExeName = "WeatherWidget48.exe" },
                 new() { Name = "桌面万年历",     Folder = "DesktopCalendar", ExeName = "DesktopCalendar.exe" },
                 new() { Name = "天气CPU网速",    Folder = "DesktopMonitor",  ExeName = "DesktopMonitor.exe" },
                 new() { Name = "桌面音乐",       Folder = "DesktopMusic",    ExeName = "DesktopMusic.exe" },
@@ -589,6 +589,9 @@ namespace WidgetHub
                 new() { Name = "桌面视频",       Folder = "DesktopVideo",    ExeName = "DesktopVideo.exe" },
                 new() { Name = "桌面记账",       Folder = "DesktopWallet",   ExeName = "DesktopWallet.exe" },
                 new() { Name = "桌面RSS",        Folder = "RssWidget",       ExeName = "RssWidget.exe" },
+                new() { Name = "桌面记事",       Folder = "DesktopNotes",    ExeName = "DesktopNotes.exe" },
+                new() { Name = "桌面相框",       Folder = "DesktopPhoto",    ExeName = "DesktopPhoto.exe" },
+                new() { Name = "桌面阴历",       Folder = "DesktopLunar",    ExeName = "DesktopLunar.exe" },
                 new() { Name = "炫彩鼠标尾巴",   Folder = "NeonMouseTrail",  ExeName = "NeonMouseTrail.exe", Positionless = true },
             };
             return new Config { Skins = skins };
@@ -1811,7 +1814,7 @@ namespace WidgetHub
             tray = new NotifyIcon
             {
                 Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath),
-                Text = "WidgetHub 桌面挂件管理器",
+                Text = "桌面挂件合集 桌面挂件管理器",
                 Visible = true
             };
             var menu = new ContextMenuStrip();
@@ -1820,7 +1823,7 @@ namespace WidgetHub
             menu.Items.Add("全部停止", null, (_, _) => { foreach (var s in config.Skins) Launcher.Stop(s); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("拖尾特效…", null, (_, _) => ShowTrailSettings());
-            menu.Items.Add("卸载桌面挂件总管…", null, (_, _) => LaunchUninstaller());
+            menu.Items.Add("卸载桌面挂件合集…", null, (_, _) => LaunchUninstaller());
             menu.Items.Add("退出（同时关闭所有挂件）", null, (_, _) =>
             {
                 foreach (var s in config.Skins) Launcher.Stop(s);
@@ -1949,7 +1952,7 @@ namespace WidgetHub
                     return;
                 }
                 MessageBox.Show("没有找到卸载程序（Uninstall\\WidgetHubUninstall.exe）。\r\n" +
-                                "可以到开始菜单里找“卸载桌面挂件总管”，或直接删除安装目录。",
+                                "可以到开始菜单里找“卸载桌面挂件合集”，或直接删除安装目录。",
                                 "卸载", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch { }

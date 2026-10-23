@@ -1,8 +1,8 @@
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 internal static class Program
 {
-    private const string MutexName = @"Local\XiaoPuHeWeather.Widget";
+    private const string MutexName = @"Local\WeatherWidget48.Widget";
 
     [STAThread]
     private static void Main()
@@ -10,7 +10,7 @@ internal static class Program
         using var mutex = new Mutex(true, MutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {
-            AppMessageBox.Show(null, "安宁市天气挂件已在运行。", "安宁市天气挂件", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            AppMessageBox.Show(null, "桌面天气小挂件已在运行。", "桌面天气小挂件", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
@@ -53,7 +53,7 @@ internal static class Program
         AppMessageBox.Show(
             null,
             $"发生未处理的错误：{exception.Message}",
-            "安宁市天气挂件",
+            "桌面天气小挂件",
             MessageBoxButtons.OK,
             MessageBoxIcon.Error);
     }

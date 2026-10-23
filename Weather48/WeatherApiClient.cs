@@ -3,7 +3,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed class WeatherApiClient
 {
@@ -85,7 +85,7 @@ public sealed class WeatherApiClient
         {
             Timeout = Timeout.InfiniteTimeSpan
         };
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("XiaoPuHeWeather", "1.0"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("WeatherWidget48", "1.0.7"));
         client.DefaultRequestHeaders.AcceptLanguage.Add(new StringWithQualityHeaderValue("zh-CN"));
         return client;
     }

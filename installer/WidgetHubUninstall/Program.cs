@@ -12,11 +12,12 @@ namespace WidgetHubUninstall
     {
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WidgetHub";
 
-        // 会被一起结束的进程（管理程序 + 10 个挂件）
+        // 会被一起结束的进程（管理程序 + 13 个挂件）
         private static readonly string[] ProcessNames =
         {
-            "WidgetHub", "XiaoPuHeWeather", "DesktopCalendar", "DesktopMonitor", "DesktopMusic",
-            "DesktopRadio", "DesktopTimer", "DesktopVideo", "DesktopWallet", "RssWidget", "NeonMouseTrail"
+            "WidgetHub", "WeatherWidget48", "DesktopCalendar", "DesktopMonitor", "DesktopMusic",
+            "DesktopRadio", "DesktopTimer", "DesktopVideo", "DesktopWallet", "RssWidget", "NeonMouseTrail",
+            "DesktopNotes", "DesktopPhoto", "DesktopLunar"
         };
 
         [STAThread]
@@ -70,13 +71,13 @@ namespace WidgetHubUninstall
         {
             try
             {
-                string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "桌面挂件总管");
+                string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "桌面挂件合集");
                 if (Directory.Exists(startMenu)) Directory.Delete(startMenu, true);
             }
             catch { }
             try
             {
-                string desktop = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "桌面挂件总管.lnk");
+                string desktop = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "桌面挂件合集.lnk");
                 if (File.Exists(desktop)) File.Delete(desktop);
             }
             catch { }
@@ -130,7 +131,7 @@ namespace WidgetHubUninstall
         public ConfirmForm(string dir)
         {
             installDir = dir;
-            Text = "卸载 桌面挂件总管";
+            Text = "卸载 桌面挂件合集";
             ClientSize = new Size(470, 230);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -141,7 +142,7 @@ namespace WidgetHubUninstall
 
             var title = new Label
             {
-                Text = "确定要卸载桌面挂件总管吗？",
+                Text = "确定要卸载桌面挂件合集吗？",
                 Font = new Font("Microsoft YaHei", 11F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(15, 23, 42),
                 AutoSize = true,
@@ -150,7 +151,7 @@ namespace WidgetHubUninstall
             var desc = new Label
             {
                 Text = "将删除以下内容：\r\n" +
-                       "· 安装目录（管理器 + 10 个挂件）\r\n" +
+                       "· 安装目录（管理器 + 13 个挂件）\r\n" +
                        "· 开始菜单与桌面快捷方式\r\n" +
                        "· 开机自启设置\r\n\r\n" +
                        "安装目录：" + dir,

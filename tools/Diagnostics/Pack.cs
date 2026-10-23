@@ -1,11 +1,11 @@
 using System.IO.Compression;
 
-// 打包：把 WidgetHub 发布目录 + 10 个挂件 exe 打进一个 payload.zip（供安装程序内嵌）
+// 打包：把 WidgetHub 发布目录 + 13 个挂件 exe 打进一个 payload.zip（供安装程序内嵌）
 internal static class Pack
 {
     private static readonly (string name, string sub, string exe)[] Skins =
     {
-        ("安宁市天气", "XiaoPuHeWeather", "XiaoPuHeWeather.exe"),
+        ("北京市天气", "WeatherWidget48", "WeatherWidget48.exe"),
         ("桌面万年历", "DesktopCalendar", "DesktopCalendar.exe"),
         ("天气CPU网速", "DesktopMonitor", "DesktopMonitor.exe"),
         ("桌面音乐", "DesktopMusic", "DesktopMusic.exe"),
@@ -14,6 +14,9 @@ internal static class Pack
         ("桌面视频", "DesktopVideo", "DesktopVideo.exe"),
         ("桌面记账", "DesktopWallet", "DesktopWallet.exe"),
         ("桌面RSS", "RssWidget", "RssWidget.exe"),
+        ("桌面记事", "DesktopNotes", "DesktopNotes.exe"),
+        ("桌面相框", "DesktopPhoto", "DesktopPhoto.exe"),
+        ("桌面阴历", "DesktopLunar", "DesktopLunar.exe"),
         ("炫彩鼠标尾巴", "NeonMouseTrail", "NeonMouseTrail.exe"),
     };
 
@@ -32,7 +35,7 @@ internal static class Pack
             File.Copy(f, Path.Combine(appDir, name), true);
         }
 
-        // 2) 10 个挂件（只取主 exe 和附属数据，不带卸载器/备份）
+        // 2) 13 个挂件（只取主 exe 和附属数据，不带卸载器/备份）
         foreach (var s in Skins)
         {
             string src = Path.Combine(programsDir, s.sub);
@@ -69,11 +72,11 @@ internal static class Pack
 
         // 5) 说明
         File.WriteAllText(Path.Combine(stageDir, "安装说明.txt"),
-            "桌面挂件总管 WidgetHub\r\n" +
+            "Windows版桌面挂件合集\r\n" +
             "=================================\r\n\r\n" +
             "安装目录里有两个部分：\r\n" +
             "  WidgetHub\\    统一管理器（托盘里只有它一个图标）\r\n" +
-            "  Skins\\        10 个桌面挂件本体\r\n\r\n" +
+            "  Skins\\        13 个桌面挂件本体\r\n\r\n" +
             "用法：\r\n" +
             "  · 双击 WidgetHub\\WidgetHub.exe 打开管理器界面\r\n" +
             "  · 关闭管理器只是收进托盘，不会退出；在托盘图标上右键可以真正退出\r\n" +

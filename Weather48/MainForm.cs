@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed class MainForm : Form
 {
@@ -69,7 +69,7 @@ public sealed class MainForm : Form
         Padding = Padding.Empty;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
-        Text = "安宁市天气挂件";
+        Text = "桌面天气小挂件";
         TopMost = false;
 
         _contextMenu = new DismissibleContextMenuStrip
@@ -182,7 +182,7 @@ public sealed class MainForm : Form
         {
             ContextMenuStrip = _contextMenu,
             Icon = _appIcon,
-            Text = "安宁市天气挂件 " + BuildVersionNumber(),
+            Text = "桌面天气小挂件 " + BuildVersionNumber(),
             // WidgetHub 统一托盘：默认不显示挂件自带托盘图标（需要时启动参数加 --tray）
             Visible = false
         };
@@ -259,7 +259,7 @@ public sealed class MainForm : Form
         // `_settings.WindowX/Y = Left/Top`。在 OnHandleCreated 阶段窗口尺寸还没定，
         // 第一次渲染算出来的位置是错的（实测 Top=0 = 屏幕顶部），
         // 随后被 SaveSettings 存进配置文件，于是**每次启动都跑到屏幕顶部，再也回不来**。
-        // 这个坑就是"安宁市天气挂件跑到屏幕顶部"的真正原因。
+        // 这个坑就是"桌面天气小挂件跑到屏幕顶部"的真正原因。
         bool wasReady = _positionReady;
         _positionReady = false;
         try
@@ -450,7 +450,7 @@ public sealed class MainForm : Form
 
             try
             {
-                var logPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XiaoPuHeWeather", "weather-error.log");
+                var logPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WeatherWidget48", "weather-error.log");
                 System.IO.File.AppendAllText(logPath, DateTime.Now.ToString("HH:mm:ss") + " " + exception + Environment.NewLine + Environment.NewLine);
             }
             catch { }
@@ -467,7 +467,7 @@ public sealed class MainForm : Form
                 AppMessageBox.Show(
                     this,
                     $"天气刷新失败：{exception.Message}",
-                    "安宁市天气挂件",
+                    "桌面天气小挂件",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
             }
@@ -562,7 +562,7 @@ public sealed class MainForm : Form
             AppMessageBox.Show(
                 this,
                 $"无法修改开机自启：{exception.Message}",
-                "安宁市天气挂件",
+                "桌面天气小挂件",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
         }
@@ -591,14 +591,14 @@ public sealed class MainForm : Form
     ///
     /// 这两个数都是按用户摆出来的布局定的：
     /// 天气CPU 自己贴任务栏（高 51px，顶部在工作区下边缘往上 51px 处），
-    /// 安宁市在它**上方 4px**（用户指定）⇒ 底边距工作区下边缘 51 + 4 = 55。
+    /// 天气挂件在它**上方 4px**（用户指定）⇒ 底边距工作区下边缘 51 + 4 = 55。
     /// 两个挂件的中心都正好压在屏幕垂直中线上（3840 屏 ⇒ x=1920）。
     ///
     /// 水平位置不写死像素：宽度会随天气文字变（"多云" ↔ "小到中雨"），
     /// 所以是每次渲染完按当前宽度重算一次中心（见 ApplyCenteredX）。
     /// </summary>
     // 天气CPU 贴任务栏（高 51px）⇒ 底边距工作区下边缘 51 + 4（间距）= 55。
-    // 注意：行间距 2→4 以后安宁市本身高了 2px（88→90），这个数是按 90px 高算的。
+    // 注意：行间距 2→4 以后天气挂件本身高了 2px（88→90），这个数是按 90px 高算的。
     private const int DefaultBottomGap = 55;
 
     private Point DefaultLocation()
@@ -707,7 +707,7 @@ public sealed class MainForm : Form
         var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "1.0.1";
         AppMessageBox.Show(
             this,
-            $"安宁市天气挂件 {version}\n\n默认地点：云南省昆明市安宁市太平新城安宁市\n天气与地点搜索：Open-Meteo 免费公共 API\n自动刷新：每15分钟\n普通桌面窗口，不置顶\n统一字体：{fontStatus}\n菜单自动关闭：{_contextMenu.AutoCloseDelay.TotalSeconds:F0} 秒无操作，或点击菜单外、按下 ESC\n\n右键菜单或托盘菜单可更换地点、调整显示、锁定位置、开机自启或退出。",
+            $"桌面天气小挂件 {version}\n\n默认地点：北京市\n天气与地点搜索：Open-Meteo 免费公共 API\n自动刷新：每15分钟\n普通桌面窗口，不置顶\n统一字体：{fontStatus}\n菜单自动关闭：{_contextMenu.AutoCloseDelay.TotalSeconds:F0} 秒无操作，或点击菜单外、按下 ESC\n\n右键菜单或托盘菜单可更换地点、调整显示、锁定位置、开机自启或退出。",
             "关于",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
@@ -808,7 +808,7 @@ public sealed class MainForm : Form
                 AppMessageBox.Show(
                     this,
                     $"无法保存设置：{exception.Message}",
-                    "安宁市天气挂件",
+                    "桌面天气小挂件",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
             }

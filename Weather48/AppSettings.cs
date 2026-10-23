@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed class AppSettings
 {
@@ -60,7 +60,6 @@ public sealed class AppSettings
 
     public void Normalize()
     {
-        MigrateLegacyLocation();
         LocationName = NormalizeText(LocationName, GeoLocation.Default.Name, 80);
         Admin1 = NormalizeText(Admin1, string.Empty, 80);
         Admin2 = NormalizeText(Admin2, string.Empty, 80);
@@ -89,35 +88,6 @@ public sealed class AppSettings
         FirstLineColor = NormalizeColor(FirstLineColor, "#42A5F5");
         SecondLineColor = NormalizeColor(SecondLineColor, "#FFFFFF");
         BackgroundColor = NormalizeColor(BackgroundColor, "#20242C");
-    }
-
-    private void MigrateLegacyLocation()
-    {
-        if (string.Equals(LocationName, "安宁市村", StringComparison.Ordinal))
-        {
-            LocationName = GeoLocation.Default.Name;
-        }
-
-        if (!string.Equals(LocationName, "安宁市", StringComparison.Ordinal)
-            || !string.Equals(Admin1, "云南", StringComparison.Ordinal)
-            || !string.Equals(Admin2, "昆明市", StringComparison.Ordinal)
-            || !Near(Latitude, 24.8835)
-            || !Near(Longitude, 102.5710))
-        {
-            return;
-        }
-
-        LocationName = GeoLocation.Default.Name;
-        Admin1 = GeoLocation.Default.Admin1;
-        Admin2 = GeoLocation.Default.Admin2;
-        Country = GeoLocation.Default.Country;
-        Latitude = GeoLocation.Default.Latitude;
-        Longitude = GeoLocation.Default.Longitude;
-    }
-
-    private static bool Near(double left, double right)
-    {
-        return Math.Abs(left - right) < 0.0001;
     }
 
     private static string NormalizeText(string? value, string fallback, int maximumLength)

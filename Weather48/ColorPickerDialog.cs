@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace XiaoPuHeWeather;
+namespace WeatherWidget48;
 
 public sealed class ColorPickerDialog : Form
 {
