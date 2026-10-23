@@ -4,3 +4,4 @@ linux/widgets-src/mpv-libs/
 upgrade_publish_2.9.82.sh
 clean_history_publish.sh
 linux/dist/*.deb
+finish_publish.sh
