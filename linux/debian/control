@@ -3,7 +3,7 @@ Version: 2.9.82
 Section: utils
 Priority: optional
 Architecture: all
-Maintainer: ooo <desktop-widgets-suite@users.noreply.github.com>
+Maintainer: Desktop Widgets Suite <desktop-widgets-suite@users.noreply.github.com>
 Installed-Size: 200000
 Replaces: mouse-trail, taskbar-info, deepin-taskbar-look, desktop-tools, desktop-weather, desktop-widgets, edge-scroll-control, hotkey-launcher, lobehub-wallet, monitor-input-switch, taskbar-clock, shot-ocr, copy-toolbar, system-cleaner
 Depends: python3 (>= 3.8), python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, gir1.2-pango-1.0, python3-xlib, fonts-noto-cjk, gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1, policykit-1 | pkexec

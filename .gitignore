@@ -1,3 +1,4 @@
 __pycache__/
 *.pyc
 linux/widgets-src/mpv-libs/
+upgrade_publish_2.9.82.sh

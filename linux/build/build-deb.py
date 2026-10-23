@@ -411,6 +411,9 @@ INJECT_WIDGET_FIXES = [
     # 装在 usr/lib/mouse-trail/main.py → 文件头按路径自动切 mouse-trail 身份
     # （APP_ID=com.deepin.DesktopWidgetsMouseTrail），与控制中心/守护/.off 对齐
     ('widgets-src/mouse-trail.py', 'usr/lib/mouse-trail/main.py', 0o644),
+    # v2.9.82：taskbar-info 净化版（参考包 2.9.80 里的旧文件带开发者
+    # 本机默认城市，公开仓库/deb 前统一替换为通用默认值）
+    ('widgets-src/taskbar-info.py', 'usr/lib/taskbar-info/taskbar-info.py', 0o644),
 ]
 
 

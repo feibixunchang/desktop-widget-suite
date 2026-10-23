@@ -29,7 +29,7 @@ installer/
   WidgetHubSetup/     一键安装程序（net48，内嵌 payload.zip）
   WidgetHubUninstall/ 卸载程序（net48）
   Defender-Exclude.bat 给 Defender 加排除项
-Weather48/            安宁市天气挂件（从 net8 降到 net48，去掉 .NET 8 运行时依赖）
+Weather48/            天气挂件（从 net8 降到 net48，去掉 .NET 8 运行时依赖）
 tools/Diagnostics/     开发诊断工具：实屏截图、窗口坐标对比、打包负载
 release.sh            一键发布：改版本号 → 构建 → 提交 → 推送 → 发 GitHub Release
 ```

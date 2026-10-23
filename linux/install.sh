@@ -13,9 +13,10 @@
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEB="$HERE/dist/desktop-widgets-suite_2.9.82_all.deb"
-ROLLBACK="/home/user/.desktop-widgets-rollback/20261020-184139"
+# 回滚点动态取最新备份（写死时间戳只对某一台机器的一次安装有效）
+ROLLBACK="$(ls -dt "$HOME"/.desktop-widgets-rollback/*/ 2>/dev/null | head -1 || true)"
 SUP="/usr/local/lib/desktop-widgets-supervisor/supervisor.py"
-SUP_PIDF="/home/user/.local/share/desktop-widgets-supervisor/supervisor.pid"
+SUP_PIDF="$HOME/.local/share/desktop-widgets-supervisor/supervisor.pid"
 
 WIDGETS=(desktop-calendar desktop-frame desktop-monitor desktop-movie desktop-music \
          desktop-notes desktop-radio desktop-rss desktop-timer desktop-wallet \

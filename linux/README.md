@@ -169,7 +169,7 @@ rm     ~/.config/desktop-widgets/desktop-weather.off   # 恢复
 安装前请用 `install.sh rollback` 或手动保留备份。本机已生成备份点：
 
 ```
-/home/user/.desktop-widgets-rollback/20261020-184139/
+~/.desktop-widgets-rollback/<时间戳>/
 ```
 
 一键回滚到安装前状态（详见 `install.sh`）：
