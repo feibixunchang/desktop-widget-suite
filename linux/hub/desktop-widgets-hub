@@ -389,6 +389,19 @@ def _http_json(url, token='', timeout=12):
         return json.loads(r.read().decode('utf-8'))
 
 
+def _deb_version(name):
+    """从 deb 资产名解析版本：desktop-widgets-suite_2.9.81_all.deb → '2.9.81'。
+
+    不能直接用 tag_name：本仓库同时发 Windows（win-vX.Y，只有 exe）和
+    Linux（linux-vX.Y.Z，带 .deb）两种 release，tag 带平台前缀，
+    _ver_tuple('linux-v2.9.81') 会解析成 (0,9,81)，比已装版本还"旧"。
+    """
+    base = (name or '').lower()
+    if not base.endswith('_all.deb') or '_' not in base[:-len('_all.deb')]:
+        return ''
+    return base[:-len('_all.deb')].rsplit('_', 1)[1]
+
+
 def check_update():
     """返回 dict: {'ok':bool, 'latest':str, 'url':str, 'notes':str, 'error':str, 'need_token':bool}"""
     cfg = load_update_cfg()
@@ -400,17 +413,35 @@ def check_update():
             res['url'] = data.get('deb') or data.get('url') or ''
             res['notes'] = data.get('notes') or data.get('body') or ''
         else:
-            url = 'https://api.github.com/repos/%s/releases/latest' % cfg['repo']
+            # 旧写法查 releases/latest：该接口按发布时间取"最新"release，而本仓库
+            # 最新的往往是 Windows release（win-vX.Y，只带 WidgetHubSetup.exe）
+            # → 误报"最新发行版里没有 .deb 资源"（检查失败）。
+            # 改为列出最近 release，取【第一个带 .deb 资产】的，自动跳过
+            # Windows-only / draft / prerelease；版本号从 deb 资产名解析。
+            url = 'https://api.github.com/repos/%s/releases?per_page=30' % cfg['repo']
             data = _http_json(url, cfg.get('token', ''))
-            res['latest'] = str(data.get('tag_name') or '').lstrip('vV')
-            res['notes'] = data.get('body') or ''
-            for asset in data.get('assets') or []:
-                name = (asset.get('name') or '').lower()
-                if name.endswith('.deb'):
-                    res['url'] = asset.get('browser_download_url') or ''
-                    break
+            if not isinstance(data, list):
+                res['error'] = '仓库返回数据异常'
+                return res
+            for rel in data:
+                if rel.get('draft') or rel.get('prerelease'):
+                    continue
+                deb_asset = None
+                for asset in rel.get('assets') or []:
+                    if (asset.get('name') or '').lower().endswith('.deb'):
+                        deb_asset = asset
+                        break
+                if deb_asset is None:
+                    continue
+                ver = _deb_version(deb_asset.get('name'))
+                if not ver:
+                    continue
+                res['latest'] = ver
+                res['url'] = deb_asset.get('browser_download_url') or ''
+                res['notes'] = rel.get('body') or ''
+                break
             if not res['url']:
-                res['error'] = '最新发行版里没有 .deb 资源'
+                res['error'] = '最近的发行版里没有 .deb 资源（Windows release 会被自动跳过）'
                 return res
         if not res['latest']:
             res['error'] = '未能解析版本号'
