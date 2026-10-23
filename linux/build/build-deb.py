@@ -542,7 +542,18 @@ def build_patched(ref_deb, out_deb, src_root):
     for src_rel, arcname, mode in inject_list:
         p = os.path.join(src_root, src_rel)
         with open(p, 'rb') as fh:
-            extra.append((arcname, fh.read(), mode))
+            data = fh.read()
+        # v2.9.82：hub 的 VERSION 常量是手改的，漏改 → 界面标题/状态栏
+        # 显示旧版本（v2.9.81 就踩了：新逻辑旧版本号，用户以为没升级）。
+        # 注入时统一替换为 debian/control 的版本号，杜绝此类脱节。
+        if arcname == 'usr/local/bin/desktop-widgets-hub':
+            ver = _control_version()
+            if ver:
+                txt = re.sub(r"(?m)^VERSION\s*=\s*['\"][^'\"]*['\"]",
+                             "VERSION = '%s'" % ver, data.decode('utf-8'), count=1)
+                data = txt.encode('utf-8')
+                print("  hub VERSION 常量 -> %s" % ver)
+        extra.append((arcname, data, mode))
     # ③ mpv / tesseract 自包含运行时：二进制 + 92 个依赖 .so + 语言数据，
     #    全部平铺进已存在的 /usr/local/lib/mpv/（不建任何新目录）
     mpv_dir = os.path.join(src_root, 'widgets-src', 'mpv-libs')

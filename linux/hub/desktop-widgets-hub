@@ -14,6 +14,7 @@
 状态由自愈守护 (supervisor.py) 统一管理；本程序通过标记文件与进程信号与之协作。
 """
 import base64
+import hashlib
 import json
 import os
 import shlex
@@ -25,10 +26,20 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = '2.9.80'
+VERSION = '2.9.82'
 APP_ID = 'com.deepin.DesktopWidgetsHub'
 PKG_NAME = 'desktop-widgets-suite'
 DEFAULT_REPO = 'feibixunchang/desktop-widget-suite'
+# 下载加速渠道：对 GitHub release 直链做前缀代理的国内镜像。
+# 镜像站稳定性随时间变化，用户可在 update.json 的 mirrors 字段
+# （逗号分隔）追加自定义前缀，构建渠道时自动并入。
+MIRROR_PREFIXES = [
+    'https://ghfast.top/',
+    'https://ghproxy.net/',
+    'https://gh.llkk.cc/',
+    'https://ghproxy.cn/',
+    'https://mirror.ghproxy.com/',
+]
 
 SELF = '/usr/local/bin/desktop-widgets-hub'
 if not os.path.exists(SELF):
@@ -353,7 +364,7 @@ def installed_version():
 
 
 def load_update_cfg():
-    cfg = {'repo': DEFAULT_REPO, 'token': '', 'feed': ''}
+    cfg = {'repo': DEFAULT_REPO, 'token': '', 'feed': '', 'mirrors': ''}
     try:
         with open(UPDATE_CFG_PATH) as f:
             data = json.load(f)
@@ -370,7 +381,7 @@ def save_update_cfg(cfg):
     try:
         os.makedirs(MARK_DIR, exist_ok=True)
         with open(UPDATE_CFG_PATH, 'w') as f:
-            json.dump({k: cfg.get(k, '') for k in ('repo', 'token', 'feed')},
+            json.dump({k: cfg.get(k, '') for k in ('repo', 'token', 'feed', 'mirrors')},
                       f, ensure_ascii=False, indent=2)
         os.chmod(UPDATE_CFG_PATH, 0o600)
         return True
@@ -445,6 +456,7 @@ def check_update():
                 if aid:
                     res['api_url'] = ('https://api.github.com/repos/%s/releases/assets/%s'
                                       % (cfg['repo'], aid))
+                res['digest'] = deb_asset.get('digest') or ''
                 res['notes'] = rel.get('body') or ''
                 break
             if not res['url']:
@@ -487,29 +499,163 @@ def cache_read():
         return {}
 
 
-def download(url, token, dest, progress=None, api_url=None):
-    # 私有仓库的 browser_download_url 302 到 S3 时 Authorization 头会丢，
-    # 直接下必 404。有 API 资产地址（/releases/assets/<id>）就优先走它，
-    # Accept: application/octet-stream + Bearer token 可直接拿到字节流。
-    target = api_url if (api_url and token) else url
-    req = urllib.request.Request(target, headers={
-        'User-Agent': 'desktop-widgets-hub/%s' % VERSION,
-        'Accept': 'application/octet-stream',
-    })
-    if token:
-        req.add_header('Authorization', 'Bearer ' + token)
-    with urllib.request.urlopen(req, timeout=60) as r, open(dest, 'wb') as f:
-        total = int(r.headers.get('Content-Length') or 0)
-        got = 0
+class _Cancelled(Exception):
+    """竞速下载中已有赢家，本渠道主动退出。"""
+
+
+def _mirror_prefixes():
+    """默认镜像 + 用户自定义（update.json 的 mirrors，逗号分隔或列表）。"""
+    out = list(MIRROR_PREFIXES)
+    try:
+        extra = load_update_cfg().get('mirrors') or []
+    except Exception:
+        extra = []
+    if isinstance(extra, str):
+        extra = [s for s in extra.replace(',', '\n').split('\n') if s.strip()]
+    for e in extra:
+        e = str(e).strip().rstrip('/') + '/'
+        if e.startswith('http') and e not in out:
+            out.append(e)
+    return out
+
+
+def build_channels(url, api_url, token):
+    """构造下载渠道列表 [(name, url, token)]：
+    github-api    —— /releases/assets/<id>，私有仓库唯一可靠通道
+    github-direct —— 官方直链，仓库公开后匿名可下
+    mirror:*      —— 国内镜像前缀代理，绕过 api.github.com 连通性问题
+    """
+    chans = []
+    if api_url and token:
+        chans.append(('github-api', api_url, token))
+    if url:
+        chans.append(('github-direct', url, ''))
+        for p in _mirror_prefixes():
+            chans.append(('mirror:%s' % p.split('/')[2], p + url, ''))
+    return chans
+
+
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
         while True:
-            chunk = r.read(65536)
-            if not chunk:
+            b = f.read(1 << 20)
+            if not b:
                 break
-            f.write(chunk)
-            got += len(chunk)
-            if progress and total:
-                progress(got, total)
+            h.update(b)
+    return h.hexdigest()
+
+
+def download_race(channels, dest, progress=None, digest=None):
+    """多渠道并行竞速下载：各渠道写独立 .partN，最快完整且校验通过者
+    胜出（原子 rename 成 dest），其余取消。全部失败抛异常，消息含各渠道原因。"""
+    if not channels:
+        raise ValueError('没有可用的下载渠道')
+    lock = threading.Lock()
+    state = {'got': {}, 'total': 0, 'winner': None,
+             'conns': {}, 'errors': []}
+    done = threading.Event()
+
+    def emit():
+        if not progress:
+            return
+        with lock:
+            got = sum(state['got'].values())
+            total = state['total']
+        progress(got, total)
+
+    def work(i, ch):
+        name, u, tok = ch
+        part = '%s.part%d' % (dest, i)
+        try:
+            req = urllib.request.Request(u, headers={
+                'User-Agent': 'desktop-widgets-hub/%s' % VERSION,
+                'Accept': 'application/octet-stream',
+            })
+            if tok:
+                req.add_header('Authorization', 'Bearer ' + tok)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                with lock:
+                    state['conns'][i] = resp
+                total = int(resp.headers.get('Content-Length') or 0)
+                if total:
+                    with lock:
+                        if not state['total']:
+                            state['total'] = total
+                got = 0
+                with open(part, 'wb') as f:
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        got += len(chunk)
+                        with lock:
+                            state['got'][i] = got
+                        if done.is_set():
+                            raise _Cancelled(name)
+                        emit()
+            if digest:
+                want = digest.split(':', 1)[-1].strip().lower()
+                if want and _sha256_file(part) != want:
+                    raise ValueError('sha256 校验失败（渠道内容被篡改或不完整）')
+            with lock:
+                won_now = state['winner'] is None
+                if won_now:
+                    state['winner'] = i
+                    done.set()
+                    os.replace(part, dest)
+        except _Cancelled:
+            pass
+        except Exception as e:
+            with lock:
+                state['errors'].append('%s → %s: %s' % (name, type(e).__name__, e))
+        finally:
+            try:
+                if os.path.exists(part):
+                    os.remove(part)
+            except OSError:
+                pass
+            with lock:
+                state['conns'].pop(i, None)
+
+    threads = []
+    for i, ch in enumerate(channels):
+        t = threading.Thread(target=work, args=(i, ch), daemon=True)
+        t.start()
+        threads.append(t)
+    # 等第一个赢家；所有线程自然结束也算完
+    while True:
+        if done.wait(0.2):
+            break
+        if not any(t.is_alive() for t in threads):
+            break
+    with lock:
+        won = state['winner'] is not None
+        conns = list(state['conns'].values())
+    if won:
+        # 关掉输家的连接，让阻塞在 read 上的线程立刻退出
+        for c in conns:
+            try:
+                c.close()
+            except Exception:
+                pass
+    for t in threads:
+        t.join(timeout=5)
+    with lock:
+        won = state['winner'] is not None
+        errs = list(state['errors'])
+    if not won:
+        detail = '\n'.join('  ' + e for e in errs) or '未知原因'
+        raise RuntimeError('所有下载渠道均失败：\n%s' % detail)
     return dest
+
+
+def download(url, token, dest, progress=None, api_url=None, digest=None):
+    """多渠道竞速下载（保留旧签名兼容；新代码建议直接 build_channels +
+    download_race，以便自定义渠道）。"""
+    channels = build_channels(url, api_url, token)
+    return download_race(channels, dest, progress, digest)
 
 
 def install_deb_root(path):
@@ -620,9 +766,11 @@ def build_ui():
         theme = Gtk.IconTheme.get_default()
         if icon_name and theme.has_icon(icon_name):
             b = Gtk.Button()
-            img = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.BUTTON)
+            img = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.LARGE_TOOLBAR)
+            img.set_pixel_size(22)          # 原 16px，条目行里太小
             b.add(img)
             b.set_relief(Gtk.ReliefStyle.NONE)
+            b.set_size_request(34, 34)      # 点击区域随之放大
         else:
             b = Gtk.Button(label=fallback)
         b.set_tooltip_text(tip)
@@ -918,7 +1066,11 @@ def run_app():
             mb = Gtk.MenuButton()
             mb.set_relief(Gtk.ReliefStyle.NONE)
             if Gtk.IconTheme.get_default().has_icon('open-menu-symbolic'):
-                mb.add(Gtk.Image.new_from_icon_name('open-menu-symbolic', Gtk.IconSize.BUTTON))
+                _mi = Gtk.Image.new_from_icon_name('open-menu-symbolic',
+                                                   Gtk.IconSize.LARGE_TOOLBAR)
+                _mi.set_pixel_size(22)
+                mb.add(_mi)
+                mb.set_size_request(34, 34)
             else:
                 mb.set_label('⋮')
             pop = Gtk.Popover()
@@ -1198,6 +1350,10 @@ def run_app():
             row(1, '访问令牌', e_token, 'Personal Access Token，仅保存在本机 ~/.config/desktop-widgets/update.json（600 权限）')
             e_feed = Gtk.Entry(); e_feed.set_text(cfg.get('feed') or '')
             row(2, '自定义更新源', e_feed, '可选：返回 {"version":"x.y.z","deb":"下载地址"} 的 JSON 地址')
+            e_mirrors = Gtk.Entry()
+            e_mirrors.set_text(', '.join(cfg.get('mirrors') or []) if isinstance(cfg.get('mirrors'), list)
+                               else (cfg.get('mirrors') or ''))
+            row(3, '下载镜像', e_mirrors, '逗号分隔的镜像前缀，与 GitHub 官方渠道并行竞速取最快；默认已内置多个')
             hint = Gtk.Label()
             hint.set_markup('<span foreground="#8b8b8b" size="small">'
                             '留空令牌时会尝试匿名访问；私有仓库被拒时在此填入令牌即可。</span>')
@@ -1207,7 +1363,8 @@ def run_app():
             if dlg.run() == Gtk.ResponseType.OK:
                 save_update_cfg({'repo': e_repo.get_text().strip() or DEFAULT_REPO,
                                  'token': e_token.get_text().strip(),
-                                 'feed': e_feed.get_text().strip()})
+                                 'feed': e_feed.get_text().strip(),
+                                 'mirrors': e_mirrors.get_text().strip()})
                 self._check_update(silent=True)
             dlg.destroy()
 
@@ -1257,7 +1414,8 @@ def run_app():
 
             def worker():
                 try:
-                    download(url, token, dest, progress, info.get('api_url'))
+                    download(url, token, dest, progress, info.get('api_url'),
+                             info.get('digest'))
                     GLib.idle_add(self._set_banner, '<b>正在安装，请输入管理员密码…</b>')
                     r = subprocess.run(['pkexec', SELF, '--install-deb', dest])
                     GLib.idle_add(self._after_update, r.returncode, info['latest'], dest)
