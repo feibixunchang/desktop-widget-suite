@@ -407,6 +407,10 @@ INJECT_WIDGET_FIXES = [
     # frame 不在 FONT_PATCH_TARGETS 里，widget_font.py 必须显式注入，
     # 否则 frame.py 的 `from widget_font import ...` 会 ModuleNotFoundError
     ('common/widget_font.py', 'usr/local/lib/desktop-frame/widget_font.py', 0o644),
+    # v2.9.81：鼠标拖尾重写版（自实现 SNI + dbusmenu + 空闲降频）。
+    # 装在 usr/lib/mouse-trail/main.py → 文件头按路径自动切 mouse-trail 身份
+    # （APP_ID=com.deepin.DesktopWidgetsMouseTrail），与控制中心/守护/.off 对齐
+    ('widgets-src/mouse-trail.py', 'usr/lib/mouse-trail/main.py', 0o644),
 ]
 
 
