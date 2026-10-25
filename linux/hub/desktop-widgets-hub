@@ -26,6 +26,34 @@ import time
 import urllib.error
 import urllib.request
 
+
+# ── 输入法修正（v2.9.87）────────────────────────────────
+# dde-autostart 用 runuser+env 精简环境启动本程序，GTK_IM_MODULE 与
+# XMODIFIERS 丢失 → 控制中心各输入框（启动命令/附加参数/挂件字体/repo/
+# token 等）只能打英文、切不出中文。GTK 在首次创建控件时才读这两个变量，
+# 而本文件所有 gi 导入均在函数内（懒加载），在模块顶层补环境变量即可保证
+# 生效。探测逻辑与 /usr/local/bin/desktop-* 启动器注入段保持一致。
+def _fix_im_env():
+    imd = ''
+    for d in ('/usr/lib/x86_64-linux-gnu/gtk-3.0/3.0.0/immodules',
+              '/usr/lib/gtk-3.0/3.0.0/immodules'):
+        if os.path.isdir(d):
+            imd = d
+            break
+    if not imd:
+        return
+    cur = os.environ.get('GTK_IM_MODULE', '')
+    if cur and os.path.isfile(os.path.join(imd, 'im-%s.so' % cur)):
+        return
+    for m in ('fcitx5', 'fcitx', 'ibus', 'xim'):
+        if os.path.isfile(os.path.join(imd, 'im-%s.so' % m)):
+            os.environ['GTK_IM_MODULE'] = m
+            os.environ.setdefault('XMODIFIERS', '@im=' + m)
+            return
+
+
+_fix_im_env()
+
 VERSION = '2.9.82'
 APP_ID = 'com.deepin.DesktopWidgetsHub'
 PKG_NAME = 'desktop-widgets-suite'

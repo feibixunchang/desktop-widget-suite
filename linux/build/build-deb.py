@@ -468,12 +468,19 @@ fi
 
 
 def patch_launcher(nm, data):
-    """给挂件启动器（/usr/local/bin/desktop-* 的 bash 脚本）补输入法修正。
+    """给挂件启动器（bash 脚本）补输入法修正。
 
-    只处理 shell 启动器；控制中心 desktop-widgets-hub 是 python 脚本、
-    会被 shebang 判断自动跳过。
+    覆盖 usr/local/bin/ 与 usr/bin/ 下所有 shell 启动器。早期只匹配
+    usr/local/bin/desktop-*，漏掉了两类：usr/bin/ 下的 taskbar-info、
+    shot-ocr、mouse-trail、copy-toolbar、system-cleaner、deepin-taskbar-look，
+    以及 usr/local/bin/ 下非 desktop- 前缀的 edge-scroll-control、
+    monitor-input-switch、detect-mouse-button。这些工具由 dde-autostart
+    用 runuser+env 精简环境启动，没有 GTK_IM_MODULE/XMODIFIERS，
+    GTK 输入框只能打英文（v2.9.87：任务栏「设置天气城市」输不了中文）。
+    控制中心 desktop-widgets-hub 是 python 脚本、mpv/tesseract 是二进制，
+    会被 shebang 判断自动跳过（hub 的输入法修正在其源码内做）。
     """
-    if not nm.startswith('usr/local/bin/desktop-'):
+    if not (nm.startswith('usr/local/bin/') or nm.startswith('usr/bin/')):
         return data
     try:
         text = data.decode('utf-8')

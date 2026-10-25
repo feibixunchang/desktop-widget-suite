@@ -12,7 +12,7 @@
 #==================================================================
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-DEB="$HERE/dist/desktop-widgets-suite_2.9.86_all.deb"
+DEB="$HERE/dist/desktop-widgets-suite_2.9.87_all.deb"
 # 回滚点动态取最新备份（写死时间戳只对某一台机器的一次安装有效）
 ROLLBACK="$(ls -dt "$HOME"/.desktop-widgets-rollback/*/ 2>/dev/null | head -1 || true)"
 SUP="/usr/local/lib/desktop-widgets-supervisor/supervisor.py"
