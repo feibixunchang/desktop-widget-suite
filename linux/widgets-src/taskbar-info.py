@@ -1555,7 +1555,7 @@ class TimeBar:
 
     def on_set_weather_city(self):
         """天气城市搜索对话框：输入城市/乡村名 -> 候选列表 -> 存 名称+坐标"""
-        dlg = Gtk.Dialog(title='设置天气城市', parent=self, flags=Gtk.DialogFlags.MODAL)
+        dlg = Gtk.Dialog(title='设置天气城市', parent=self.win, flags=Gtk.DialogFlags.MODAL)
         dlg.add_buttons('取消', Gtk.ResponseType.CANCEL, '保存', Gtk.ResponseType.OK)
         dlg.set_default_size(420, 460)
         box = dlg.get_content_area()
@@ -1611,10 +1611,10 @@ class TimeBar:
                 Gtk.main_iteration()
             try:
                 results = []
-                for name in (q, self._strip_suffix(q)):   # 原样 -> 剥离行政后缀
+                for name in (q, self.weather._strip_suffix(q)):   # 原样 -> 剥离行政后缀
                     url = ('https://geocoding-api.open-meteo.com/v1/search?name=%s&count=10&language=zh'
                            % urllib.parse.quote(name))
-                    data = self._json(url) or {}
+                    data = self.weather._json(url) or {}
                     results = data.get('results') or []
                     if results:
                         break
