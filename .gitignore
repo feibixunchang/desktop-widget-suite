@@ -15,3 +15,5 @@ upgrade_publish_2.9.86.sh
 upgrade_publish_2.9.87.sh
 clean_history_publish.sh
 finish_publish.sh
+WidgetHub/publish48/
+installer/*/out/

@@ -148,14 +148,14 @@ internal sealed class AboutForm : Form
 		};
 		Label val2 = new Label
 		{
-			Text = "当前版本：v1.6     发布仓库：feibixunchang/desktop-widget-suite",
+			Text = "当前版本：v" + AppInfo.Version + "     发布仓库：" + AppInfo.RepoOwner + "/" + AppInfo.RepoName,
 			ForeColor = Color.FromArgb(100, 116, 139),
 			AutoSize = true,
 			Location = new Point(24, 58)
 		};
 		Label val3 = new Label
 		{
-			Text = "更新令牌（私有仓库需要，填 GitHub PAT 即可）：",
+			Text = "更新令牌（可选：仓库是公开的不需要填，只有改回私有仓库时才需要 GitHub PAT）：",
 			ForeColor = Color.FromArgb(100, 116, 139),
 			AutoSize = true,
 			Location = new Point(24, 138)
@@ -217,7 +217,7 @@ internal sealed class AboutForm : Form
 			UpdateInfo updateInfo = await UpdateService.CheckAsync(config.UpdateToken);
 			if (updateInfo == null)
 			{
-				((Control)lblState).Text = "检查失败：无法访问发布仓库（私有仓库请填写有效令牌）";
+				((Control)lblState).Text = "检查失败：连不上 GitHub 发布页（公开仓库不需要令牌，请检查网络/代理后重试）";
 				return;
 			}
 			latest = updateInfo;
@@ -226,14 +226,14 @@ internal sealed class AboutForm : Form
 				((Control)lblState).Text = "仓库里还没有 Windows 版发布记录（tag 需带 win- 前缀）。";
 				((Control)btnInstall).Enabled = false;
 			}
-			else if (UpdateService.IsNewer(updateInfo.TagVersion, "1.6"))
+			else if (UpdateService.IsNewer(updateInfo.TagVersion, AppInfo.Version))
 			{
-				((Control)lblState).Text = "发现新版本 v" + updateInfo.TagVersion + "（当前 v1.6），点「下载并安装新版本」即可升级。";
+				((Control)lblState).Text = "发现新版本 v" + updateInfo.TagVersion + "（当前 v" + AppInfo.Version + "），点「下载并安装新版本」即可升级。";
 				((Control)btnInstall).Enabled = !string.IsNullOrEmpty(updateInfo.AssetUrl);
 			}
 			else
 			{
-				((Control)lblState).Text = "已经是最新版本（v1.6）。";
+				((Control)lblState).Text = "已经是最新版本（v" + AppInfo.Version + "）。";
 				((Control)btnInstall).Enabled = false;
 			}
 		}

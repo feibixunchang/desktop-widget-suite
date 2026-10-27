@@ -23,11 +23,40 @@ echo "==> 1/6 更新版本号 -> $TAG"
 python - "$VER" << 'PY'
 import re, sys, io
 ver = sys.argv[1]
-p = 'WidgetHub/Program.cs'
-s = io.open(p, encoding='utf-8').read()
-s = re.sub(r'(public const string Version = ")[^"]*(")', r'\g<1>' + ver + r'\g<2>', s, count=1)
-io.open(p, 'w', encoding='utf-8').write(s)
-print('   WidgetHub/Program.cs 版本号已更新为', ver)
+parts = ver.split('.')
+while len(parts) < 3:
+    parts.append('0')
+ver3 = '.'.join(parts[:3])
+ver4 = ver3 + '.0'
+
+def patch(path, pattern, repl):
+    s = io.open(path, encoding='utf-8').read()
+    s, n = re.subn(pattern, repl, s)
+    if n == 0:
+        sys.exit('!! 版本号没改进 %s（没匹配到 %s）' % (path, pattern))
+    io.open(path, 'w', encoding='utf-8').write(s)
+    print('   %s' % path)
+
+# 界面上的版本号读的是 AppInfo.Version，这几处必须一起改，
+# 否则会出现「装的是新版、界面还显示旧版」。
+patch('WidgetHub/WidgetHub/AppInfo.cs',
+      r'(public const string Version = ")[^"]*(")', r'\g<1>' + ver + r'\g<2>')
+patch('WidgetHub/Properties/AssemblyInfo.cs',
+      r'(\[assembly: AssemblyFileVersion\(")[^"]*("\)\])', r'\g<1>' + ver4 + r'\g<2>')
+patch('WidgetHub/Properties/AssemblyInfo.cs',
+      r'(\[assembly: AssemblyInformationalVersion\(")[^"]*("\)\])', r'\g<1>' + ver3 + r'\g<2>')
+patch('WidgetHub/Properties/AssemblyInfo.cs',
+      r'(\[assembly: AssemblyVersion\(")[^"]*("\)\])', r'\g<1>' + ver4 + r'\g<2>')
+patch('WidgetHub/app.manifest',
+      r'(assemblyIdentity version=")[^"]*(")', r'\g<1>' + ver4 + r'\g<2>')
+for proj in ('installer/WidgetHubSetup/WidgetHubSetup.csproj',
+             'installer/WidgetHubUninstall/WidgetHubUninstall.csproj'):
+    patch(proj, r'(<Version>)[^<]*(</Version>)', r'\g<1>' + ver3 + r'\g<2>')
+    patch(proj, r'(<AssemblyVersion>)[^<]*(</AssemblyVersion>)', r'\g<1>' + ver4 + r'\g<2>')
+    patch(proj, r'(<FileVersion>)[^<]*(</FileVersion>)', r'\g<1>' + ver4 + r'\g<2>')
+patch('installer/WidgetHubSetup/app.manifest',
+      r'(assemblyIdentity version=")[^"]*(")', r'\g<1>' + ver4 + r'\g<2>')
+print('   版本号已统一更新为', ver)
 PY
 
 echo "==> 2/6 构建管理器"

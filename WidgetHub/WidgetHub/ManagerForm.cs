@@ -341,7 +341,7 @@ public class ManagerForm : Form
 							SolidBrush val11 = new SolidBrush(Color.FromArgb(226, 236, 255));
 							try
 							{
-								string text2 = "v1.6";
+								string text2 = "v" + AppInfo.Version;
 								SizeF sizeF3 = graphics.MeasureString(text2, val10);
 								float num8 = (float)((Control)header).Width - sizeF3.Width - 18f * num;
 								graphics.DrawString(text2, val10, Brushes.White, num8, 18f * num, val8);
@@ -1369,6 +1369,13 @@ public class ManagerForm : Form
 		try
 		{
 			((Form)aboutForm).ShowDialog((IWin32Window)(object)this);
+			// 关于框里保存过令牌后，config.json 的监听可能已经把这个窗口的 config
+			// 换成了令牌写盘之前读到的旧对象；不重新加载，下一次 SaveConfig 就会把令牌冲掉。
+			Config reloaded = Config.TryLoad();
+			if (reloaded != null)
+			{
+				config = reloaded;
+			}
 		}
 		finally
 		{

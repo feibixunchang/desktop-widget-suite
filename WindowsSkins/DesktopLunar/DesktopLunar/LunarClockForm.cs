@@ -70,7 +70,10 @@ internal sealed class LunarClockForm : WidgetForm
 		{
 			Rectangle placementArea = PlacementArea;
 			Size size = MeasureWidgetSize();
-			return new Rectangle(placementArea.Left + (placementArea.Width - size.Width) / 2, placementArea.Top, size.Width, size.Height);
+			// 顶部居中：水平取工作区中线，字号过大导致长条比屏幕还宽时贴左边界，
+			// 否则算出的负 X 会被存进设置，下次启动就跑到屏幕左边外面。
+			int left = placementArea.Left + Math.Max(0, (placementArea.Width - size.Width) / 2);
+			return new Rectangle(left, placementArea.Top, size.Width, size.Height);
 		}
 	}
 
@@ -434,13 +437,28 @@ internal sealed class LunarClockForm : WidgetForm
 		return pt * dpi / 72f;
 	}
 
-	private string TemplateText()
+	private static StringFormat TextFormat()
+	{
+		// 测量与绘制共用这一个格式：默认格式的 MeasureString 会在每段两侧附带留白，
+		// 四段分别累加出来的排版宽度会大于整串测量值，末段就被挤出窗口右边界。
+		StringFormat stringFormat = (StringFormat)StringFormat.GenericTypographic.Clone();
+		stringFormat.FormatFlags |= StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces;
+		stringFormat.Alignment = (StringAlignment)0;
+		stringFormat.LineAlignment = (StringAlignment)0;
+		return stringFormat;
+	}
+
+	private string[] MeasureSegments()
 	{
 		DateTime now = TimeSync.Now;
 		LunarDate lunarDate = Lunar.FromSolar(now);
-		// 模板必须和实际排版等宽：日期 + 星期 + 时间 + 农历
-		// （星期是 2 个汉字，"周三" 恒定宽，用"周三"占位即可）
-		return now.Year.ToString(CultureInfo.InvariantCulture) + "年" + now.Month.ToString(CultureInfo.InvariantCulture) + "月" + now.Day.ToString(CultureInfo.InvariantCulture) + "日" + "周三" + "88:88:88" + lunarDate.ShortYearText + lunarDate.ToString();
+		return new string[4]
+		{
+			now.Year.ToString(CultureInfo.InvariantCulture) + "年" + now.Month.ToString(CultureInfo.InvariantCulture) + "月" + now.Day.ToString(CultureInfo.InvariantCulture) + "日",
+			"周" + Lunar.WeekNameShort(now),
+			"88:88:88",
+			lunarDate.ShortYearText + lunarDate.ToString()
+		};
 	}
 
 	private Size MeasureWidgetSize()
@@ -463,13 +481,19 @@ internal sealed class LunarClockForm : WidgetForm
 					Font val3 = new Font(Fonts.FamilyName, num, (FontStyle)0, (GraphicsUnit)2);
 					try
 					{
-						StringFormat val4 = new StringFormat((StringFormatFlags)6148);
+						StringFormat val4 = TextFormat();
 						try
 						{
-							val4.Alignment = (StringAlignment)0;
-							val4.LineAlignment = (StringAlignment)0;
-							SizeF sizeF = val2.MeasureString(TemplateText(), val3, PointF.Empty, val4);
-							return new Size((int)Math.Ceiling(sizeF.Width) + PadX * 2, (int)Math.Ceiling(sizeF.Height) + PadY * 2);
+							string[] array = MeasureSegments();
+							float num2 = 0f;
+							float num3 = 0f;
+							foreach (string text in array)
+							{
+								SizeF sizeF = val2.MeasureString(text, val3, PointF.Empty, val4);
+								num2 += sizeF.Width;
+								num3 = Math.Max(num3, sizeF.Height);
+							}
+							return new Size((int)Math.Ceiling(num2) + PadX * 2 + 2, (int)Math.Ceiling(num3) + PadY * 2);
 						}
 						finally
 						{
@@ -565,7 +589,7 @@ internal sealed class LunarClockForm : WidgetForm
 		Font val2 = new Font(Fonts.FamilyName, num, (FontStyle)0, (GraphicsUnit)2);
 		try
 		{
-			StringFormat val3 = new StringFormat((StringFormatFlags)6148);
+			StringFormat val3 = TextFormat();
 			try
 			{
 				int num2 = Math.Max(1, (int)Math.Round(num / 28f));

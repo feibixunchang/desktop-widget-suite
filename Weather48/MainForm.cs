@@ -9,13 +9,11 @@ public sealed class MainForm : Form
 
     private static readonly int RefreshIntervalMilliseconds = (int)RefreshInterval.TotalMilliseconds;
     private readonly SettingsStore _settingsStore;
-    private readonly StartupManager _startupManager;
     private readonly WeatherApiClient _weatherApiClient;
     private readonly DismissibleContextMenuStrip _contextMenu;
     private readonly NotifyIcon _trayIcon;
     private readonly ToolStripMenuItem _refreshMenuItem;
     private readonly ToolStripMenuItem _lockPositionMenuItem;
-    private readonly ToolStripMenuItem _startupMenuItem;
     private readonly System.Windows.Forms.Timer _refreshTimer;
     private readonly System.Windows.Forms.Timer _fullscreenTimer = new();
     private bool _hiddenForFullscreen;
@@ -52,7 +50,7 @@ public sealed class MainForm : Form
     /// <summary>用户横向拖动超过这个像素数才算"他要自己摆位置"。</summary>
     private const int HorizontalFreeThreshold = 2;
 
-    public MainForm(SettingsStore? settingsStore = null, WeatherApiClient? weatherApiClient = null, StartupManager? startupManager = null)
+    public MainForm(SettingsStore? settingsStore = null, WeatherApiClient? weatherApiClient = null)
     {
         _settingsStore = settingsStore ?? new SettingsStore();
         _settings = _settingsStore.Load();
@@ -61,7 +59,6 @@ public sealed class MainForm : Form
         // "用户保存过位置"和"这是刚算出来的占位位置"了（这个坑我自己踩了一次，
         // 结果永远进不了居中模式，挂件停在离中线 771px 的地方）。
         _settings.TopMost = false;
-        _startupManager = startupManager ?? new StartupManager();
         _weatherApiClient = weatherApiClient ?? new WeatherApiClient();
         _appIcon = AppIconProvider.Load();
         Icon = _appIcon;
@@ -143,8 +140,6 @@ public sealed class MainForm : Form
               SyncMenuState();
           };
 
-        _startupMenuItem = new ToolStripMenuItem("开机自启");
-        _startupMenuItem.Click += (_, _) => ToggleStartup();
         var centerMenuItem = new ToolStripMenuItem("回到默认位置（对齐屏幕垂直中线）");
         centerMenuItem.Click += (_, _) => ResetPosition();
         var centerXMenuItem = new ToolStripMenuItem("水平对齐屏幕中线（保留当前高度）");
@@ -167,7 +162,6 @@ public sealed class MainForm : Form
           _contextMenu.Items.Add(desktopLayerItem);
           _contextMenu.Items.Add(appearanceMenuItem);
         _contextMenu.Items.Add(new ToolStripSeparator());
-        _contextMenu.Items.Add(_startupMenuItem);
         _contextMenu.Items.Add(centerMenuItem);
         _contextMenu.Items.Add(resetPositionMenuItem);
         _contextMenu.Items.Add(new ToolStripSeparator());
@@ -585,26 +579,6 @@ public sealed class MainForm : Form
         SyncMenuState();
     }
 
-    private void ToggleStartup()
-    {
-        try
-        {
-            var enabled = !_startupManager.IsEnabled();
-            _startupManager.SetEnabled(enabled);
-            SaveSettings();
-            SyncMenuState();
-        }
-        catch (Exception exception)
-        {
-            AppMessageBox.Show(
-                this,
-                $"无法修改开机自启：{exception.Message}",
-                "桌面天气小挂件",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-        }
-    }
-
     private void ResetPosition()
     {
         _settings.FreeHorizontalPosition = false;
@@ -955,14 +929,6 @@ public sealed class MainForm : Form
               }
           }
 
-          try
-          {
-              _startupMenuItem.Checked = _startupManager.IsEnabled();
-          }
-          catch
-          {
-              _startupMenuItem.Checked = false;
-          }
       }
 
     private static Color ParseColor(string color)

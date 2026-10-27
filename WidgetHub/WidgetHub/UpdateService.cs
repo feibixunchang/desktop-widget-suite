@@ -12,15 +12,86 @@ namespace WidgetHub;
 
 public static class UpdateService
 {
+	/// <summary>
+	/// 先走 github.com 的 releases/latest 跳转（公开仓库不需要令牌，也不占 REST 配额），
+	/// 只有仓库重新变私有、这条走不通时才回落到 API（这时才用令牌）。
+	/// </summary>
 	public static async Task<UpdateInfo?> CheckAsync(string token)
 	{
-		_ = 1;
+		UpdateInfo? publicRelease = await CheckPublicAsync().ConfigureAwait(continueOnCapturedContext: false);
+		if (publicRelease != null)
+		{
+			return publicRelease;
+		}
+		return await CheckApiAsync(token).ConfigureAwait(continueOnCapturedContext: false);
+	}
+
+	private const string LatestReleaseUrl = AppInfo.RepoUrl + "/releases/latest";
+
+	private const string TagPathMarker = "/releases/tag/";
+
+	private static async Task<UpdateInfo?> CheckPublicAsync()
+	{
 		try
 		{
-			HttpClient client = NewClient();
+			HttpClient client = NewClient(sendApiAcceptHeader: false);
 			try
 			{
-				HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/repos/feibixunchang/desktop-widget-suite/releases?per_page=100");
+				HttpResponseMessage resp = await client.GetAsync(LatestReleaseUrl).ConfigureAwait(continueOnCapturedContext: false);
+				try
+				{
+					if (!resp.IsSuccessStatusCode)
+					{
+						return null;
+					}
+					string text = ((resp.RequestMessage != null) ? (resp.RequestMessage.RequestUri?.ToString() ?? "") : "");
+					int num = text.IndexOf(TagPathMarker, StringComparison.OrdinalIgnoreCase);
+					if (num < 0)
+					{
+						return null;
+					}
+					string text2 = text.Substring(num + TagPathMarker.Length).Trim('/');
+					if (text2.Length <= "win-".Length || !text2.StartsWith("win-", StringComparison.OrdinalIgnoreCase))
+					{
+						return null;
+					}
+					string text3 = text2.Substring("win-".Length).TrimStart('v', 'V');
+					if (text3.Length == 0)
+					{
+						return null;
+					}
+					return new UpdateInfo
+					{
+						TagVersion = text3,
+						HtmlUrl = text,
+						AssetName = AppInfo.AssetName,
+						AssetUrl = AppInfo.RepoUrl + "/releases/download/" + text2 + "/" + AppInfo.AssetName
+					};
+				}
+				finally
+				{
+					((IDisposable)resp)?.Dispose();
+				}
+			}
+			finally
+			{
+				((IDisposable)client)?.Dispose();
+			}
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private static async Task<UpdateInfo?> CheckApiAsync(string token)
+	{
+		try
+		{
+			HttpClient client = NewClient(sendApiAcceptHeader: true);
+			try
+			{
+				HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, AppInfo.ReleasesApi);
 				try
 				{
 					if (!string.IsNullOrWhiteSpace(token))
@@ -144,7 +215,7 @@ public static class UpdateService
 		string path = Path.Combine(text2, "WidgetHubSetup.exe");
 		try
 		{
-			HttpClient client = NewClient();
+			HttpClient client = NewClient(sendApiAcceptHeader: false);
 			try
 			{
 				HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, text);
@@ -154,7 +225,9 @@ public static class UpdateService
 					{
 						req.Headers.Accept.ParseAdd("application/octet-stream");
 					}
-					if (!string.IsNullOrWhiteSpace(token))
+					// 令牌只发给 api.github.com：browser_download_url 会 302 到 CDN，
+					// 带上令牌等于把 PAT 投给第三方主机。
+					if (!string.IsNullOrWhiteSpace(token) && string.Equals(req.RequestUri?.Host, "api.github.com", StringComparison.OrdinalIgnoreCase))
 					{
 						req.Headers.Authorization = new AuthenticationHeaderValue("token", token.Trim());
 					}
@@ -208,19 +281,17 @@ public static class UpdateService
 		}
 	}
 
-	private static HttpClient NewClient()
+	private static HttpClient NewClient(bool sendApiAcceptHeader)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0019: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0044: Expected O, but got Unknown
 		HttpClient val = new HttpClient
 		{
 			Timeout = TimeSpan.FromMinutes(5.0)
 		};
-		val.DefaultRequestHeaders.UserAgent.ParseAdd("WidgetHub/1.6");
-		val.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+		val.DefaultRequestHeaders.UserAgent.ParseAdd("WidgetHub/" + AppInfo.Version);
+		if (sendApiAcceptHeader)
+		{
+			val.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+		}
 		return val;
 	}
 

@@ -16,16 +16,7 @@ if %errorlevel% neq 0 (
 )
 
 set TARGETS=%LOCALAPPDATA%\Programs\WidgetHubSuite
-set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\DesktopCalendar
-set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\DesktopMonitor
-set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\DesktopMusic
-set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\DesktopRadio
-set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\DesktopTimer
-set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\DesktopVideo
-set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\DesktopWallet
-set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\RssWidget
-set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\NeonMouseTrail
-set TARGETS=%TARGETS%;%LOCALAPPDATA%\Programs\WeatherWidget48
+set TARGETS=%TARGETS%;%APPDATA%\WidgetHub
 set TARGETS=%TARGETS%;%USERPROFILE%\Documents\WidgetHub
 
 echo Adding Defender exclusions...
