@@ -2,7 +2,7 @@ namespace WidgetHub;
 
 public static class AppInfo
 {
-	public const string Version = "1.7.1";
+	public const string Version = "1.7.2";
 
 	public const string DisplayName = "桌面挂件合集";
 

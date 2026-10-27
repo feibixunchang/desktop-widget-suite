@@ -52,6 +52,9 @@ internal sealed class AppSettings
 
 	public int? WindowY { get; set; }
 
+	// 用户是否真的拖动过挂件。没拖过就每次按默认位置（紧贴任务栏上方居中）摆，
+	// 这样改了窗口宽度（字体、硬盘列数）之后不会被一个老坐标钉在偏心位置。
+	public bool UserMoved { get; set; }
 	public bool DesktopLayer { get; set; }
 
 	public bool DarkBackground { get; set; } = true;
@@ -117,7 +120,8 @@ internal sealed class AppSettings
 				"darkBackground=" + (DarkBackground ? "1" : "0"),
 				"backgroundOpacity=" + BackgroundOpacity.ToString(CultureInfo.InvariantCulture),
 				WindowX.HasValue ? ("x=" + WindowX.Value.ToString(CultureInfo.InvariantCulture)) : "x=",
-				WindowY.HasValue ? ("y=" + WindowY.Value.ToString(CultureInfo.InvariantCulture)) : "y="
+				WindowY.HasValue ? ("y=" + WindowY.Value.ToString(CultureInfo.InvariantCulture)) : "y=",
+				"moved=" + (UserMoved ? "1" : "0")
 			};
 			File.WriteAllLines(FilePath, contents, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 		}
@@ -284,6 +288,11 @@ internal sealed class AppSettings
 		case 2:
 		case 3:
 		case 5:
+			if (text == "moved")
+			{
+				UserMoved = value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase);
+			}
+			break;
 		case 7:
 		case 10:
 		case 13:

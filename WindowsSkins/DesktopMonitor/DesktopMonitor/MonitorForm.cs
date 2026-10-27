@@ -41,7 +41,10 @@ internal sealed class MonitorForm : Form
 
 	private const string NetworkWidthSample = "网速 ↓999MB/s ↑999MB/s";
 
-	private const string WeatherWidthSample = "北京市 雷雨  25.9℃ 湿度 39% 西南风 13km/h 更新17:15";
+	// 天气列的"占位宽度"模板，必须是真实文本的上界：温度 PadLeft(5)、湿度 PadLeft(3)、
+	// 风速 PadLeft(3) 都用数字补位，所以这里全用 9 占满，城市名运行时再换成当前城市。
+	// 只要真实文本永远不超过它，天气异步到达就不会让整行重新排版、窗口重新变宽。
+	private const string WeatherWidthSample = "北京市 雷雨 999.9℃ 湿度100% 西北风999km/h 更新23:59";
 
 	private const int WidthQuantum = 40;
 
@@ -169,7 +172,7 @@ internal sealed class MonitorForm : Form
 
 	private bool layoutReady;
 
-	private bool widthLocked;
+	private bool weatherWarmupStarted;
 
 	private bool fontJustChanged;
 
@@ -367,7 +370,9 @@ internal sealed class MonitorForm : Form
 			//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 			//IL_000b: Expected O, but got Unknown
 			StopTimer((Timer)sender);
-			if (!self.isClosing)
+			// 这个 100ms 的"稳定后再居中"跑在 OnShown 之后：用户拖动过、已经按记住的坐标
+			// 摆好位的话，再居中一次就把位置抢回去了，所以只在没有记住位置时才居中。
+			if (!self.isClosing && !self.settings.UserMoved)
 			{
 				self.CenterOnTaskbar();
 			}
@@ -391,11 +396,21 @@ internal sealed class MonitorForm : Form
 			}
 		};
 		reassertTimer.Start();
+		// 窗口显示之前先把本地数据读好（硬盘有几块盘只有读了才知道）。以前第一帧是空数据，
+		// 硬盘那一列宽度 0，窗口按窄的算，盘读到了再变宽重画 —— 就是"先残缺一点点、过两秒才齐"。
+		// 天气在这里不读（要联网），见 StartWeatherWarmup。
+		try
+		{
+			LoadData();
+		}
+		catch
+		{
+		}
 	}
 
 	private void EnsurePosition()
 	{
-		if (!isClosing && ((Control)this).IsHandleCreated && ((Control)this).Visible && settings.PositionLocked && !(dragStart != Point.Empty) && settings.WindowX.HasValue && settings.WindowY.HasValue && NativeMethods.GetWindowRect(((Control)this).Handle, out var rect) && (rect.Left != settings.WindowX.Value || rect.Top != settings.WindowY.Value))
+		if (!isClosing && ((Control)this).IsHandleCreated && ((Control)this).Visible && settings.PositionLocked && settings.UserMoved && !(dragStart != Point.Empty) && settings.WindowX.HasValue && settings.WindowY.HasValue && NativeMethods.GetWindowRect(((Control)this).Handle, out var rect) && (rect.Left != settings.WindowX.Value || rect.Top != settings.WindowY.Value))
 		{
 			if (desktopAttached && desktopHandle != IntPtr.Zero)
 			{
@@ -606,7 +621,10 @@ internal sealed class MonitorForm : Form
 		base.OnShown(e);
 		AttachToDesktop();
 		CenterOnTaskbar();
-		if (settings.WindowX.HasValue && settings.WindowY.HasValue)
+		// 默认位置就是"紧贴任务栏上方居中"（上面 CenterOnTaskbar 刚摆好的）。
+		// 只有用户真的拖动过挂件，才用记住的坐标；否则窗口一变宽就还回居中，
+		// 不会被上一次窄窗口留下的老坐标钉在屏幕中间。
+		if (settings.UserMoved && settings.WindowX.HasValue && settings.WindowY.HasValue)
 		{
 			MoveWidgetTo(settings.WindowX.Value, settings.WindowY.Value);
 			WriteDiag("OnShown: 使用记住的位置 " + settings.WindowX + "," + settings.WindowY);
@@ -664,6 +682,37 @@ internal sealed class MonitorForm : Form
 		val2.Start();
 	}
 
+	// 天气要联网（超时 4 秒）。以前第一帧也在这儿同步等，结果 CPU/内存/硬盘/网速
+	// 全被拖住：窗口还停在初始 1000 宽、五列宽度都是 0，文字全叠在 x=0 上，
+	// 看起来就是"先残缺蹦出来一点点，过两秒才完整"。改成后台拉、拉到后刷新一次。
+	private void StartWeatherWarmup()
+	{
+		if (weatherWarmupStarted || isClosing)
+		{
+			return;
+		}
+		weatherWarmupStarted = true;
+		ThreadPool.QueueUserWorkItem(delegate
+		{
+			try
+			{
+				weatherService.GetWeatherText();
+			}
+			catch
+			{
+			}
+			if (isClosing)
+			{
+				return;
+			}
+			if (weatherService.PeekCachedText().Length == 0)
+			{
+				weatherWarmupStarted = false;
+			}
+			TimerTick();
+		});
+	}
+
 	private static void WriteDiag(string message)
 	{
 		try
@@ -718,7 +767,6 @@ internal sealed class MonitorForm : Form
 	{
 		((Control)this).Height = CalcPanelHeight();
 		layoutReady = false;
-		widthLocked = false;
 		fontJustChanged = true;
 		segmentGap = settings.FontSize * 0.5f;
 		gapAfterCpu = settings.FontSize * 0.5f;
@@ -880,7 +928,9 @@ internal sealed class MonitorForm : Form
 
 	private void ResetToTaskbarCenter()
 	{
+		settings.UserMoved = false;
 		CenterOnTaskbar();
+		settings.Save();
 	}
 
 	private void MoveWidgetTo(int x, int y)
@@ -1340,7 +1390,11 @@ internal sealed class MonitorForm : Form
 			bool compactMode = settings.CompactMode;
 			List<DiskEntry> list = (compactMode ? new List<DiskEntry>() : SystemMetrics.GetDisks());
 			NetworkUsage networkSpeed = SystemMetrics.GetNetworkSpeed(ref previousReceivedBytes, ref previousSentBytes, RefreshMilliseconds);
-			string text = ((settings.ShowWeather && !compactMode) ? weatherService.GetWeatherText() : string.Empty);
+			string text = ((settings.ShowWeather && !compactMode) ? weatherService.PeekCachedText() : string.Empty);
+			if (text.Length == 0 && settings.ShowWeather && !compactMode)
+			{
+				StartWeatherWarmup();
+			}
 			List<string> list2 = new List<string>();
 			if (!compactMode)
 			{
@@ -1417,11 +1471,6 @@ internal sealed class MonitorForm : Form
 		{
 			graphics.SmoothingMode = (SmoothingMode)2;
 			graphics.TextRenderingHint = (TextRenderingHint)3;
-			_ = segments[0];
-			_ = segments[1];
-			string text = segments[2];
-			string text2 = segments[3];
-			_ = segments[4];
 			int num = BackgroundAlphaValue();
 			if (num <= 0)
 			{
@@ -1440,8 +1489,10 @@ internal sealed class MonitorForm : Form
 			{
 				layoutReady = false;
 			}
-			if (!layoutReady && (text2.Length > 0 || text.Length > 0 || settings.CompactMode))
+			if (!layoutReady)
 			{
+				// 不再等天气/硬盘的数据到位才排版：列宽本来就按"实际文本与采样取大"算出来的，
+				// 空文本时按采样撑底，第一帧就能算出正确的窗口宽度。
 				RecalculateLayout(graphics);
 			}
 			float top = ((float)((Control)this).Height - sampleInkHeight) / 2f - sampleInkTop;
@@ -1682,11 +1733,10 @@ internal sealed class MonitorForm : Form
 		}
 		drawOriginX = ((float)num2 - num) / 2f;
 		fontJustChanged = false;
-		if (!widthLocked && segments[2].Length > 0 && diskDriveCount > 0)
-		{
-			widthLocked = true;
-		}
-		if (!widthLocked || Math.Abs(num2 - targetWidth) >= 40)
+		// 只在宽度真的变了（≥40，正好是一个取整步长）时才改窗口尺寸并重新居中。
+		// 以前"数据还没齐"的每一次重算都会往屏幕底部居中挪一次，于是记住的位置先被甩到
+		// 中间、再被 EnsurePosition 拉回来 —— 启动时看到的"跳"有一半是它。
+		if (Math.Abs(num2 - targetWidth) >= 40)
 		{
 			targetWidth = num2;
 			CenterOnTaskbar(num2);
@@ -1713,7 +1763,19 @@ internal sealed class MonitorForm : Form
 		// ⚠️ 天气还没拉到时（segments[2] 为空）也必须按"模板宽度"留位置，
 		// 否则这一列宽度为 0，等天气回来文字就直接压在下一列（硬盘）上面。
 		// 模板固定 ⇒ 列宽恒定 ⇒ 天气异步到达也不会让整行错位。
-		return ColumnWidth(graphics, segments[2], WeatherWidthSample) + gapAfterWeather;
+		return ColumnWidth(graphics, segments[2], WeatherWidthSampleForCity()) + gapAfterWeather;
+	}
+
+	// 模板里的城市名要换成当前设置的城市：城市名比"北京市"长时，真实天气文本会比模板宽，
+	// 天气一到位整行就得变宽重排，看起来又是"先残缺、后跳齐"。
+	private string WeatherWidthSampleForCity()
+	{
+		string city = settings.CityName ?? string.Empty;
+		if (city.Length == 0)
+		{
+			return WeatherWidthSample;
+		}
+		return city + WeatherWidthSample.Substring("北京市".Length);
 	}
 
 	private float MeasureDiskWidth(Graphics graphics)
@@ -1796,6 +1858,7 @@ internal sealed class MonitorForm : Form
 		//IL_002a: Invalid comparison between Unknown and I4
 		if (dragStart != Point.Empty && !settings.PositionLocked && (int)e.Button == 1048576)
 		{
+			settings.UserMoved = true;
 			MoveWidgetTo(((Form)this).Location.X + e.X - dragStart.X, ((Form)this).Location.Y + e.Y - dragStart.Y);
 		}
 		Cursor val = (settings.PositionLocked ? Cursors.Arrow : Cursors.SizeAll);
@@ -1808,6 +1871,7 @@ internal sealed class MonitorForm : Form
 	private void PanelMouseUp(object sender, MouseEventArgs e)
 	{
 		dragStart = Point.Empty;
+		RememberPosition();
 	}
 
 	private void FormMouseDown(object sender, MouseEventArgs e)
@@ -1826,6 +1890,7 @@ internal sealed class MonitorForm : Form
 		//IL_002a: Invalid comparison between Unknown and I4
 		if (dragStart != Point.Empty && !settings.PositionLocked && (int)e.Button == 1048576)
 		{
+			settings.UserMoved = true;
 			MoveWidgetTo(((Form)this).Location.X + e.X - dragStart.X, ((Form)this).Location.Y + e.Y - dragStart.Y);
 		}
 	}

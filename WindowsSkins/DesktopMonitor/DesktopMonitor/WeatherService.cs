@@ -47,6 +47,20 @@ internal sealed class WeatherService
 		}
 	}
 
+	// 只读缓存，绝不联网。冷启动的第一帧要用它，
+	// 免得为了等天气（最长 4 秒）把 CPU/内存/硬盘/网速 一起卡住。
+	public string PeekCachedText()
+	{
+		lock (syncRoot)
+		{
+			if (cachedText.Length > 0 && (DateTime.UtcNow - lastFetchUtc).TotalMinutes < (double)Settings.WeatherRefreshMinutes)
+			{
+				return cachedText;
+			}
+			return string.Empty;
+		}
+	}
+
 	public string GetWeatherText()
 	{
 		lock (syncRoot)
