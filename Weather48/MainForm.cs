@@ -43,6 +43,14 @@ public sealed class MainForm : Form
     private int _locationVersion;
     private bool _hasWeather;
     private Point _dragOffset;
+    private int _dragStartLeft;
+
+    /// <summary>上一次真正画出来的内容指纹。内容没变就不必重建位图（拖动时尤其重要）。</summary>
+    private string? _lastSurfaceSignature;
+    private Size _lastSurfaceSize;
+
+    /// <summary>用户横向拖动超过这个像素数才算"他要自己摆位置"。</summary>
+    private const int HorizontalFreeThreshold = 2;
 
     public MainForm(SettingsStore? settingsStore = null, WeatherApiClient? weatherApiClient = null, StartupManager? startupManager = null)
     {
@@ -139,6 +147,8 @@ public sealed class MainForm : Form
         _startupMenuItem.Click += (_, _) => ToggleStartup();
         var centerMenuItem = new ToolStripMenuItem("回到默认位置（对齐屏幕垂直中线）");
         centerMenuItem.Click += (_, _) => ResetPosition();
+        var centerXMenuItem = new ToolStripMenuItem("水平对齐屏幕中线（保留当前高度）");
+        centerXMenuItem.Click += (_, _) => CenterHorizontally();
         var resetPositionMenuItem = new ToolStripMenuItem("移到主屏幕右下角");
         resetPositionMenuItem.Click += (_, _) => MoveToBottomRightCorner();
         var aboutMenuItem = new ToolStripMenuItem("关于…");
@@ -333,11 +343,31 @@ public sealed class MainForm : Form
         _secondLineFont?.Dispose();
         _firstLineFont = FontProvider.Create(_settings.FirstLineFontSize);
         _secondLineFont = FontProvider.Create(_settings.SecondLineFontSize);
+        // 字体换了，缓存的内容指纹必须作废，否则会认为"内容没变"而跳过重绘
+        _lastSurfaceSignature = null;
     }
 
     private void RenderWidget()
     {
         if (_isClosing || _firstLineFont is null || _secondLineFont is null)
+        {
+            return;
+        }
+
+        // ⚠️ 内容没变就别重画。
+        // 以前每收到一次 WM_MOUSEMOVE（拖动时每秒几十次）都重建一次位图 +
+        // 逐像素 alpha 预乘 + UpdateLayeredWindow，既卡又抖。
+        var signature = string.Join(
+            "\u0001",
+            Handle.ToInt64().ToString(),
+            _firstLineText,
+            _secondLineText,
+            _settings.FirstLineFontSize.ToString(),
+            _settings.SecondLineFontSize.ToString(),
+            _settings.FirstLineColor,
+            _settings.SecondLineColor,
+            _settings.OpacityPercent.ToString());
+        if (signature == _lastSurfaceSignature && ClientSize == _lastSurfaceSize)
         {
             return;
         }
@@ -355,17 +385,22 @@ public sealed class MainForm : Form
             // ⚠️ 窗口宽度是跟着天气文字长度变的（"多云" ↔ "小到中雨"）。
             // 改宽度时如果不管位置，挂件就会一点点往左漂 ——
             // 用户反馈"锁定位置以后过一段时间还是往左移，每次都得手动往右挪"。
-            // 这里锁住**中心**：宽度变了中心不动，位置就不会漂。
+            // 默认模式下锁住**中心**：宽度变了中心不动，位置就不会漂。
+            // 用户自己横向拖过之后（FreeHorizontalPosition）则锁左边：他觉得放哪就待在哪。
             //
             // ⚠️ `_positionReady` 这个前提不能少：构造函数里先 `ClientSize = 1x1`、位置 (0,0)，
             // 而且 `OnResize` 会回头再调 RenderWidget()，此时真正的位置还没恢复。
             // 这时候就去"锁中心"，会拿 (0,0) 当基准把窗口算到屏幕外
             // （实测存成 -771，每次启动都被拉到左边）—— 这个坑我自己踩了两次。
-            if (_positionReady && Width > 1)
+            if (_positionReady && Width > 1 && !_isDragging)
             {
                 var keepCenterX = Left + Width / 2;
+                var keepLeft = Left;
                 ClientSize = surface.Bitmap.Size;
-                var wantedLeft = keepCenterX - Width / 2;
+                var wantedLeft = _settings.FreeHorizontalPosition
+                    ? keepLeft
+                    : keepCenterX - Width / 2;
+                wantedLeft = ClampLeftToScreen(wantedLeft);
                 if (Left != wantedLeft)
                 {
                     Location = new Point(wantedLeft, Top);
@@ -373,9 +408,6 @@ public sealed class MainForm : Form
 
                 // 只更新内存里的位置，不在这里存盘：
                 // 存盘交给正常的保存路径，避免"渲染顺手改设置"。
-                // ⚠️ 必须加 _positionReady 判断：位置还没恢复的时候（构造函数里那次渲染），
-                // 往 _settings 里写位置会让 RestorePosition 误以为"用户保存过位置"，
-                // 于是永远进不了居中模式（这个坑我自己踩了一次）。
                 if (_positionReady)
                 {
                     _settings.WindowX = Left;
@@ -387,6 +419,8 @@ public sealed class MainForm : Form
                 ClientSize = surface.Bitmap.Size;
             }
 
+            _lastSurfaceSignature = signature;
+            _lastSurfaceSize = surface.Bitmap.Size;
             return;
         }
 
@@ -395,6 +429,9 @@ public sealed class MainForm : Form
         {
             LayeredWindow.Update(Handle, surface.Bitmap, Location);
         }
+
+        _lastSurfaceSignature = signature;
+        _lastSurfaceSize = surface.Bitmap.Size;
 
         // 画完再居中：这一刻 ClientSize 已经是真实宽度了
         ApplyCenteredX();
@@ -570,6 +607,7 @@ public sealed class MainForm : Form
 
     private void ResetPosition()
     {
+        _settings.FreeHorizontalPosition = false;
         Location = DefaultLocation();
         RenderWidget();
         SaveSettings();
@@ -579,11 +617,13 @@ public sealed class MainForm : Form
     private void MoveToBottomRightCorner()
     {
         var workingArea = Screen.PrimaryScreen?.WorkingArea ?? Screen.AllScreens[0].WorkingArea;
+        _settings.FreeHorizontalPosition = true;
         Location = new Point(
             Math.Max(workingArea.Left, workingArea.Right - Width - 20),
             Math.Max(workingArea.Top, workingArea.Bottom - Height - 20));
         RenderWidget();
         SaveSettings();
+        SyncMenuState();
     }
 
     /// <summary>
@@ -619,11 +659,13 @@ public sealed class MainForm : Form
     /// </summary>
     private void CenterHorizontally()
     {
+        _settings.FreeHorizontalPosition = false;
         var workingArea = Screen.FromRectangle(Bounds).WorkingArea;
         var line = workingArea.Left + workingArea.Width / 2;
         Location = new Point(line - Width / 2, Top);
         RenderWidget();
         SaveSettings();
+        SyncMenuState();
     }
 
 
@@ -639,9 +681,23 @@ public sealed class MainForm : Form
             return;
         }
 
-        // 水平：永远居中在屏幕垂直中线（每次按**当前**宽度重算）。
+        // 水平：默认模式永远居中在屏幕垂直中线（每次按**当前**宽度重算）；
+        //       用户自己横向拖过之后（FreeHorizontalPosition）就**不再动他的位置**，
+        //       只保证窗口还在屏幕里。
         // 纵向：用户拖到哪就记到哪，被系统挪走了就拉回去。
-        ApplyCenteredX();
+        if (_settings.FreeHorizontalPosition)
+        {
+            var clampedLeft = ClampLeftToScreen(Left);
+            if (clampedLeft != Left)
+            {
+                Location = new Point(clampedLeft, Top);
+            }
+        }
+        else
+        {
+            ApplyCenteredX();
+        }
+
         if (_settings.WindowY.HasValue && Top != _settings.WindowY.Value)
         {
             Location = new Point(Left, _settings.WindowY.Value);
@@ -655,6 +711,21 @@ public sealed class MainForm : Form
         }
     }
 
+    /// <summary>把一个左上角 X 夹到"至少还露在屏幕里"的范围（多屏用虚拟桌面范围）。</summary>
+    private int ClampLeftToScreen(int wantedLeft)
+    {
+        var bounds = SystemInformation.VirtualScreen;
+        var minimumVisible = Math.Min(80, Math.Max(24, Width));
+        var min = bounds.Left - Width + minimumVisible;
+        var max = bounds.Right - minimumVisible;
+        if (wantedLeft < min)
+        {
+            return min;
+        }
+
+        return wantedLeft > max ? max : wantedLeft;
+    }
+
     /// <summary>
     /// 把挂件水平居中到屏幕垂直中线（和天气CPU 用同一条线，两者左右对称）。
     ///
@@ -662,10 +733,21 @@ public sealed class MainForm : Form
     /// 挂件宽度跟着天气文字变（"多云" ↔ "小到中雨"），刚启动时宽度还是占位值，
     /// 那时算出来的中心会偏 771px（这个坑我踩了三次，用户三次看到"没居中"）。
     /// 所以在 RenderWidget 画完之后调它，那时宽度才是真的。
+    ///
+    /// ⚠️ 拖动中**绝不能**调用：拖一下就被拉回中线 = 用户看到的"乱颤"。
     /// </summary>
     private void ApplyCenteredX()
     {
-        if (_isClosing || !IsHandleCreated) { return; }
+        if (_isClosing || !IsHandleCreated || _isDragging)
+        {
+            return;
+        }
+
+        if (_settings.FreeHorizontalPosition)
+        {
+            return;
+        }
+
         var workingArea = Screen.FromRectangle(Bounds).WorkingArea;
         int wanted = workingArea.Left + workingArea.Width / 2 - Width / 2;
         if (wanted < workingArea.Left) { wanted = workingArea.Left; }
@@ -720,10 +802,19 @@ public sealed class MainForm : Form
             return;
         }
         _isDragging = true;
+        _dragStartLeft = Left;
         _dragOffset = new Point(Cursor.Position.X - Left, Cursor.Position.Y - Top);
         Capture = true;
     }
 
+    /// <summary>
+    /// 拖动：**只挪窗口**，不重画、不居中。
+    ///
+    /// 以前每次 WM_MOUSEMOVE 都调 RenderWidget()，而 RenderWidget 末尾会
+    /// ApplyCenteredX() 把挂件拉回屏幕中线 —— 用户横向拖时窗口被"拖走 → 拉回 → 拖走"
+    /// 每秒几十次来回抢，看起来就是**乱颤**，而且永远拖不到想去的地方
+    /// （结果天气挂件一直压在天气CPU 那条上面，两行字叠在一起）。
+    /// </summary>
     private void WidgetMouseMove(object? sender, MouseEventArgs eventArgs)
     {
         if (!_isDragging || _settings.PositionLocked)
@@ -731,8 +822,20 @@ public sealed class MainForm : Form
             return;
         }
 
-        Location = new Point(Cursor.Position.X - _dragOffset.X, Cursor.Position.Y - _dragOffset.Y);
-        RenderWidget();
+        var target = new Point(Cursor.Position.X - _dragOffset.X, Cursor.Position.Y - _dragOffset.Y);
+        target.X = ClampLeftToScreen(target.X);
+
+        // 横向真的动了 ⇒ 尊重用户的选择，从此不再自动居中
+        if (!_settings.FreeHorizontalPosition
+            && Math.Abs(target.X - _dragStartLeft) > HorizontalFreeThreshold)
+        {
+            _settings.FreeHorizontalPosition = true;
+        }
+
+        if (target != Location)
+        {
+            Location = target;
+        }
     }
 
     private void WidgetMouseUp(object? sender, MouseEventArgs eventArgs)
@@ -744,8 +847,11 @@ public sealed class MainForm : Form
 
         _isDragging = false;
         Capture = false;
-        RenderWidget();
+        // 落点必须立刻记进设置：不记的话 1 秒后的位置自检会拿旧坐标把它拽回去
+        _settings.WindowX = Left;
+        _settings.WindowY = Top;
         SaveSettings();
+        SyncMenuState();
     }
 
     private async void WidgetMouseDoubleClick(object? sender, MouseEventArgs eventArgs)

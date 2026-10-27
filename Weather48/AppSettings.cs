@@ -22,6 +22,14 @@ public sealed class AppSettings
 
     public bool PositionLocked { get; set; }
 
+    /// <summary>
+    /// 用户是否自己横向摆过位置。
+    /// false（默认）= 挂件自动水平居中在屏幕垂直中线；
+    /// true = 用户拖到哪就待在哪，系统不再把它拽回中线。
+    /// （拖动时强制居中会让挂件"乱颤"，横向永远拖不动。）
+    /// </summary>
+    public bool FreeHorizontalPosition { get; set; }
+
     public bool TopMost { get; set; }
 
     public int FirstLineFontSize { get; set; } = 24;

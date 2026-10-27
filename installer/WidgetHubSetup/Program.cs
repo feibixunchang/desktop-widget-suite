@@ -493,7 +493,7 @@ namespace WidgetHubSetup
                     @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WidgetHub");
                 if (key == null) return;
                 key.SetValue("DisplayName", "桌面挂件合集");
-                key.SetValue("DisplayVersion", "1.6.0");
+                key.SetValue("DisplayVersion", "1.7.0");
                 key.SetValue("Publisher", "桌面挂件合集");
                 key.SetValue("DisplayIcon", exe);
                 key.SetValue("InstallLocation", TargetDir);

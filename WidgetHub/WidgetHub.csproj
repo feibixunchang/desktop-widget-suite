@@ -1,29 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <AssemblyName>WidgetHub</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
     <OutputType>WinExe</OutputType>
-    <ApplicationIcon>WidgetHub.ico</ApplicationIcon>
+    <UseWindowsForms>True</UseWindowsForms>
     <TargetFramework>net48</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
-    <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>WidgetHub</AssemblyName>
-    <AssemblyTitle>桌面挂件合集 桌面挂件统一管理器</AssemblyTitle>
-    <Version>1.6.0</Version>
-    <AssemblyVersion>1.6.0.0</AssemblyVersion>
-    <FileVersion>1.6.0.0</FileVersion>
-    <Product>桌面挂件合集</Product>
-    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>11.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup />
   <ItemGroup>
-    <!-- net48 里 HttpClient 在这两个程序集里（System.Net.Http 只是外观） -->
+    <Reference Include="System.Text.Json" />
     <Reference Include="System.Net.Http" />
-    <Reference Include="System.Net.Http.WebRequest" />
   </ItemGroup>
-
   <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
 </Project>
