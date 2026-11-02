@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Threading;
 
 namespace DesktopMonitor;
 
@@ -64,7 +65,25 @@ internal sealed class WeatherService
 				return;
 			}
 			cachedText = array[1];
-			lastFetchUtc = savedUtc;
+			// 关键：落盘缓存往往已经过了"刷新窗口"。如果照实写回 savedUtc，
+			// PeekCachedText 的新鲜度判断会把它判死，缓存等于白存——断网冷启动时
+			// 界面就是一片空白。所以这里"先当成刚取到"让它显示出来，
+			// 同时后台立刻强制补一次真实数据；补不到就继续显示这份旧的。
+			bool expired = (DateTime.UtcNow - savedUtc).TotalMinutes >= (double)Settings.WeatherRefreshMinutes;
+			lastFetchUtc = (expired ? DateTime.UtcNow : savedUtc);
+			if (expired)
+			{
+				ThreadPool.QueueUserWorkItem(delegate
+				{
+					try
+					{
+						ForceRefresh();
+					}
+					catch
+					{
+					}
+				});
+			}
 		}
 		catch
 		{
@@ -131,28 +150,44 @@ internal sealed class WeatherService
 	}
 
 	// 只读缓存，绝不联网。冷启动的第一帧要用它，
-	// 免得为了等天气（最长 4 秒）把 CPU/内存/硬盘/网速 一起卡住。
+	// 免得为了等天气（最长 10 秒）把 CPU/内存/硬盘/网速 一起卡住。
 	public string PeekCachedText()
 	{
 		lock (syncRoot)
 		{
-			if (cachedText.Length > 0 && (DateTime.UtcNow - lastFetchUtc).TotalMinutes < (double)Settings.WeatherRefreshMinutes)
-			{
-				return cachedText;
-			}
-			return string.Empty;
+			return PeekFreshLocked() ? cachedText : string.Empty;
 		}
+	}
+
+	/// <summary>缓存是否还在刷新窗口内。调用方必须已持有 syncRoot。</summary>
+	private bool PeekFreshLocked()
+	{
+		return cachedText.Length > 0 && (DateTime.UtcNow - lastFetchUtc).TotalMinutes < (double)Settings.WeatherRefreshMinutes;
 	}
 
 	public string GetWeatherText()
 	{
 		lock (syncRoot)
 		{
-			if (cachedText.Length > 0 && (DateTime.UtcNow - lastFetchUtc).TotalMinutes < (double)Settings.WeatherRefreshMinutes)
+			if (PeekFreshLocked())
 			{
 				return cachedText;
 			}
 		}
+		return FetchAndStore();
+	}
+
+	/// <summary>
+	/// 无条件联网刷新一次。用于"冷启动先把落盘缓存显示出去、随后后台补新"，
+	/// 绕开刷新窗口判断，避免旧缓存把刷新挡死。
+	/// </summary>
+	public string ForceRefresh()
+	{
+		return FetchAndStore();
+	}
+
+	private string FetchAndStore()
+	{
 		string text = string.Empty;
 		try
 		{
