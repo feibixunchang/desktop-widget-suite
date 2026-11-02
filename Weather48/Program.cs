@@ -15,6 +15,11 @@ internal static class Program
         }
 
         EnableDpiAwareness();
+        // net48 上 ServicePointManager 有可能只协商到 TLS 1.0/1.1，而 open-meteo 只接受
+        // TLS 1.2+。表现就是"天气获取失败 / 未能与 SSL/TLS 安全通道建立信任关系"，
+        // 而且时好时坏（取决于中间代理怎么应答）。天气CPU 挂件早就显式打开了现代 TLS，
+        // 所以它的天气一直能出、这个挂件却老失败 —— 这里补齐。
+        EnableModernTls();
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
@@ -46,6 +51,20 @@ internal static class Program
         }
         catch { }
         try { SetProcessDPIAware(); } catch { }
+    }
+
+    private static void EnableModernTls()
+    {
+        try
+        {
+            System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+        }
+        catch { }
+        try
+        {
+            System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls13;
+        }
+        catch { }
     }
 
     private static void ShowException(Exception exception)

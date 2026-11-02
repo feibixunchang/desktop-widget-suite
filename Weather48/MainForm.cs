@@ -7,8 +7,16 @@ public sealed class MainForm : Form
 {
     public static TimeSpan RefreshInterval => TimeSpan.FromMinutes(15);
 
+    /// <summary>
+    /// 取天气失败后的重试间隔。
+    /// 以前失败只能干等下一个 15 分钟周期，用户看到的就是"一直刷新不出来"。
+    /// 现在失败后把定时器改成这个间隔，网络一通很快就补上。
+    /// </summary>
+    private const int RetryIntervalMilliseconds = 45 * 1000;
+
     private static readonly int RefreshIntervalMilliseconds = (int)RefreshInterval.TotalMilliseconds;
     private readonly SettingsStore _settingsStore;
+    private readonly WeatherCacheStore _weatherCacheStore;
     private readonly WeatherApiClient _weatherApiClient;
     private readonly DismissibleContextMenuStrip _contextMenu;
     private readonly NotifyIcon _trayIcon;
@@ -60,10 +68,21 @@ public sealed class MainForm : Form
         // 结果永远进不了居中模式，挂件停在离中线 771px 的地方）。
         _settings.TopMost = false;
         _weatherApiClient = weatherApiClient ?? new WeatherApiClient();
+        _weatherCacheStore = new WeatherCacheStore();
         _appIcon = AppIconProvider.Load();
         Icon = _appIcon;
         _firstLineText = $"{_settings.LocationName} | 正在获取天气…";
         _secondLineText = "七天天气预报加载中…";
+
+        // 冷启动先用上一次成功的结果顶着：网络慢或暂时不通时，用户看到的
+        // 是"刚才的天气"而不是刺眼的"天气获取失败"。真正取到数据后会被覆盖。
+        var cachedWeather = _weatherCacheStore.Load(_settings.ToGeoLocation());
+        if (cachedWeather is not null)
+        {
+            _firstLineText = cachedWeather.FirstLine!;
+            _secondLineText = cachedWeather.SecondLine!;
+            _hasWeather = true;
+        }
 
         AutoScaleMode = AutoScaleMode.None;
         AutoSize = false;
@@ -466,7 +485,10 @@ public sealed class MainForm : Form
             _secondLineText = WeatherFormatter.FormatForecastLine(weather);
             _hasWeather = true;
             RenderWidget();
+            _weatherCacheStore.Save(location, _firstLineText, _secondLineText);
+            // 取到了就回到正常的 15 分钟节奏（失败时被临时调成过快照重试）
             _refreshTimer.Stop();
+            _refreshTimer.Interval = RefreshIntervalMilliseconds;
             _refreshTimer.Start();
         }
         catch (OperationCanceledException) when (refreshCancellation.IsCancellationRequested)
@@ -486,10 +508,16 @@ public sealed class MainForm : Form
             }
             catch { }
 
+            // 失败不再干等下一个 15 分钟：把定时器调成 45 秒快速重试，
+            // 一旦成功会自动回到 15 分钟节奏。
+            _refreshTimer.Stop();
+            _refreshTimer.Interval = RetryIntervalMilliseconds;
+            _refreshTimer.Start();
+
             if (!_hasWeather)
             {
                 _firstLineText = $"{location.Name} | 天气获取失败";
-                _secondLineText = "请检查网络后右键选择“立即刷新”";
+                _secondLineText = $"网络不通，{RetryIntervalMilliseconds / 1000} 秒后自动重试";
                 RenderWidget();
             }
 
